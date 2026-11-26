@@ -1,0 +1,13 @@
+2026-11-26T08:50:44.270229+08:00 using_existing_gpu_only_router
+2026-11-26T08:50:45.171506+08:00 live_cuda_feature_planned
+2026-11-26T08:50:45.208806+08:00 access_ordinals
+2026-11-26T08:50:45.761059+08:00 resident_preflight_ready
+2026-11-26T08:50:45.764498+08:00 beginning_full_gpu_route
+2026-11-26T08:50:45.902958+08:00 native_multichannel
+2026-11-26T08:50:45.906015+08:00 reading_design_and_preparing_first_batch
+2026-11-26T08:52:24.961026+08:00 gpu_direct_precompute
+2026-11-26T08:52:25.376592+08:00 gpu_direct_precompute_complete
+2026-11-26T08:52:25.379794+08:00 waiting_for_ppt11_gpu_admission
+2026-11-26T09:01:47.505025+08:00 indirect_flood_bypassed_or_drained
+2026-11-26T09:04:02.112904+08:00 dcp_legality_verified
+2026-11-26T09:04:04.337298+08:00 complete

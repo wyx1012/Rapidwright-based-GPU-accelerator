@@ -1,0 +1,22 @@
+{
+  "host": "gpu02",
+  "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/theia50per-ppt-hybrid-v70",
+  "worker_pid": 420324,
+  "started_at": "2026-11-26T08:50:44.182916+08:00",
+  "parent": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/theia50per-ppt-hybrid-v22",
+  "engine": "v70_no_deep_nbr_plus_tight_microtail_4gpu_wide16",
+  "worker_sha256": "686e93d124b29ec3ccfa11c5775d28180680d3927fddbe0c4ecc10b139fd5198",
+  "hybrid_sha256": "2f14379053e262b55ba33719214f61ffabe2a16dec54f601139ade0768748fe7",
+  "cpp_sha256": "ade111d12c714d5f26ad3d7dfcd85b36b776dcdb3dcb9d927788b797c75fd109",
+  "fides_gpu_cu_sha256": "47c9a1c298fe557831a0dd9abc03f73143fc80a128d5e0903fd3c78848807e8c",
+  "budgets": [
+    65536,
+    262144,
+    0
+  ],
+  "sort_order": "HPWL_FIRST",
+  "short_box_pad": 4,
+  "corridor_max_round": 999,
+  "single_gpu": false,
+  "legacy_preflight_spawned": false
+}

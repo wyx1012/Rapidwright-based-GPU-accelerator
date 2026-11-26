@@ -1,0 +1,13 @@
+{
+  "ready": true,
+  "environment": {
+    "PATH": "/home/yxwang1/FIDES/recovery-2026-10-22/toolchains/amazon-corretto-11.0.31.11.1-linux-x64/bin:/usr/local/cuda-12.3/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin:/usr/games:/usr/local/games:/snap/bin",
+    "JAVA_HOME": "/home/yxwang1/FIDES/recovery-2026-10-22/toolchains/amazon-corretto-11.0.31.11.1-linux-x64",
+    "CUDA_VISIBLE_DEVICES": "",
+    "RAPIDWRIGHT_PATH": "/home/yxwang1/FIDES/RapidWright2"
+  },
+  "sha256": {
+    "hybrid": "2f14379053e262b55ba33719214f61ffabe2a16dec54f601139ade0768748fe7"
+  },
+  "reference": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/theia50per-ppt-active-frontier-v9d/cuda_v9d"
+}

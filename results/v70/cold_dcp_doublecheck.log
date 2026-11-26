@@ -1,0 +1,14 @@
+==============================================================================
+==                  Reading DCP: THEIA_50per_gpu_full.dcp                   ==
+==============================================================================
+ XML Parse & Device Load:     2.146s
+      (Read XDEF Header):            (    0.865s)
+            (EDIF Parse):            (   35.004s)
+   (Read XDEF Placement):            (   39.857s)
+     (Read XDEF Routing):            (   28.779s)
+     Read Netlist & XDEF:    79.495s
+------------------------------------------------------------------------------
+         [No GC] *Total*:    81.641s
+F4_V67_UNROUTED count=0 time_s=0.51
+F4_V37_DCP_CHECK_TIMING read=81.77s pins=2.88s pip_shards=2.61s unrouted_scan=0.54s
+F4_BASE_DCP unroutedPins=0 sharedPipNodes=0 pips=31075870

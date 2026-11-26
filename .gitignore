@@ -1,0 +1,23 @@
+# Compiled objects, shared libraries & binaries
+*.o
+*.so
+*.class
+classes/
+hybrid
+direct_paths
+
+# Large FPGA checkpoints, RRG binaries & feature dumps
+*.dcp
+*.bin
+features.live*
+*.pending
+
+# Ephemeral runtime & compile logs
+compile_*.log
+recorder.log
+access_ordinals.log
+build_idmap_cache.log
+__pycache__/
+*.pyc
+.DS_Store
+Thumbs.db
