@@ -392,7 +392,7 @@ def run_case(case, timeout, keep_rrg=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--engine", default="v73")
+    parser.add_argument("--engine", default="v76")
     parser.add_argument("--phase", choices=("prepare", "run", "both"), default="both")
     parser.add_argument("--keep-rrg", action="store_true")
     parser.add_argument("--no-rrg-cache", action="store_true")
