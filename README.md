@@ -20,14 +20,16 @@ Multi-GPU (`4 × Tesla V100-PCIE-32GB`) + 36-core NUMA C++/Java hybrid router ac
 | **End-to-End (`E2E`)** | `757.90 s` | `798.97 s` | `v70` first beat PPT Slide 15 (`807.24 s`) |
 | **`Route design` / Convergence** | `638.97 s` (`57` rounds) | `684.62 s` (`64` rounds) | `v73` tail `R53–57 = 0.88 s`, `WL = 18,964,265`, `pips=31071296` |
 
-## Full 13-Case Competition Suite & `v73` `THEIA_20per` Re-Verification
+## Full 13-Case Competition Suite (`v76` 13/13 Double-Verified PASS)
 
-Using the case-generic runner ([scripts/all13/run_all13.py](scripts/all13/run_all13.py), now defaulted to `--engine v76` with `all13-rrg-cache` hardlink caching):
+Using the case-generic runner ([scripts/all13/run_all13.py](scripts/all13/run_all13.py), defaulted to `--engine v76` with `--gpus` isolation and `all13-rrg-cache` hardlink caching):
 
-- **`v73` `THEIA_20per` Re-Test (`3.17×` E2E Speedup)**:
-  - **`E2E = 366.99 s`** (`route_wall = 364.61 s`, **`Route design = 296.16 s`**) vs `v70` `1,162.83 s` (`Route design = 1,096.54 s`) — **`-795.84 s` faster**, resolving cleanly in **`53` rounds (`over=0`)** with **`WL = 11,661,635`** (`-15,693`) and double-verified legality (`unroutedPins=0, sharedPipNodes=0, pips=18882479`, recorded in [results/v73_all13/summary.jsonl](results/v73_all13/summary.jsonl)).
-- **`v70` Baseline 13/13 Full Sweep** (all `13/13` passed cleanly with double-verified DCP legality):
-  - **Total E2E / Route Design**: **`2,798.95 s`** / **`2,248.16 s`** across `mcml_RLE`, `RLE_BlobMerging`, `oc_des_des3perf`, `aquarius_b15_1`, `RS8FreqDecode`, `k_300dsp_300ram`, `k_100_dsp`, `k_140000fd_500000lut`, `THEIA_jpeg`, `THEIA`, `k_800_ram`, `THEIA_20per`, and `THEIA_50per` ([docs/v70_all13_benchmark.md](docs/v70_all13_benchmark.md), [results/v70_all13/summary.json](results/v70_all13/summary.json)).
+- **`v76` Full 13/13 Sweep (`-894.18 s` Route Design / `-706.04 s` E2E vs `v70`)**:
+  - **Total E2E / Route Design**: **`2,092.91 s`** / **`1,353.98 s`** vs `v70` `2,798.95 s` / `2,248.16 s` (**`1.34×` E2E / `1.66×` Route Design speedup**), with **`13/13`** double-verified DCP legality (`unroutedPins=0, sharedPipNodes=0`), even with `12` cases running on **`2 × V100 [2, 3]`** and `THEIA_50per` on **`4 × V100`** ([docs/v76_all13_benchmark.md](docs/v76_all13_benchmark.md), [results/v76_all13/summary.jsonl](results/v76_all13/summary.jsonl)).
+  - **`THEIA_20per` (`2 × V100`)**: **`E2E = 363.07 s`** (`route_wall = 360.96 s`, **`Route design = 295.62 s`**, `49` rounds, `WL = 11,620,882`) — faster than `v73` on `4 × V100` (`366.99 s`, `53` rounds) and **`3.20×`** faster than `v70` (`1,162.83 s`).
+- **`v73` / `v70` Historical Reference Sweeps**:
+  - `v73` `THEIA_20per` (`4 × V100`): `E2E = 366.99 s`, `Route design = 296.16 s`, `53` rounds, `WL = 11,661,635` ([results/v73_all13/summary.jsonl](results/v73_all13/summary.jsonl)).
+  - `v70` Baseline `13/13` (`4 × V100`): Total `E2E = 2,798.95 s` / `Route design = 2,248.16 s` ([docs/v70_all13_benchmark.md](docs/v70_all13_benchmark.md), [results/v70_all13/summary.json](results/v70_all13/summary.json)).
 
 ## Key Engineering Highlights (`v22 -> v76`)
 

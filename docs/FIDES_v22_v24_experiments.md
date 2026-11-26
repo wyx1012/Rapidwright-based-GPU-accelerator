@@ -956,13 +956,24 @@
   - `Nodes popped = 26,424,392,144`、`Wirelength = 18,974,092`；
   - `F4_V66_INPROC_DCP_CHECK pins=2.58s overlap_wall=31.43s write_s=25.52s check_s=5.32s stats_s=5.90s`，冷启 `F4BaselineDcpCheck`（`read=77.95s, pins=2.92s, pip_shards=2.42s, unrouted_scan=0.50s`）双盲复核 **`F4_BASE_DCP unroutedPins=0 sharedPipNodes=0 pips=31082870`** 完全一致。
 
+### 2.57 `v76all13`（**全 `13/13` 竞赛用例全量通过并双盲合法：`THEIA_50per` 为 `4×V100`，其余 `12` 例为 `--gpus 2,3` 双卡隔离先行；13 例总 `Route design = 1,353.98 s`（较 `v70` `2,248.16 s` 快 `1.66×` / `-894.18 s`），总 `E2E = 2,092.91 s`（较 `v70` `2,798.95 s` 快 `1.34×` / `-706.04 s`）；全部 `12` 份 RRG 已写入 `all13-rrg-cache`**）
+- **脚本更新**：`scripts/all13/{run_all13.py,deploy_all13.py}` 默认切至 `--engine v76` 并新增 `--gpus` 参数严格隔离空闲卡（`--gpus 2,3` 仅挂载 GPU 2/3，彻底避开 GPU 0/1 外部 Ray/ComfyUI 作业）。
+- **逐例关键结果**（括号为 `v70` `4×V100` 对照；`v76` 除 `THEIA_50per` 外均在 `2×V100 [2,3]` 下测得）：
+  - **`THEIA_20per`（`2×V100`）**：**`E2E = 363.07 s`**（vs `v70 1,162.83 s`、`v73` 四卡 `366.99 s`！）、`Route design = 295.62 s`、`49` 轮（`over=0`）、`WL = 11,620,882`（较 `v73` 再短 `-40,753`）、`pips = 18851049`（仅 2 卡下 `sum_gpu = 92.20 s`，若 4 卡全空复跑预计 `~325 s`）。
+  - **`THEIA`（`2×V100`）**：`E2E = 162.15 s` (`162.74`)、`Route design = 121.41 s` (`125.82`)、`31` 轮、`WL = 5,118,561`、`pips = 7839187`。
+  - **`THEIA_jpeg`（`2×V100`）**：`E2E = 129.72 s` (`133.34`)、`Route design = 93.55 s` (`98.79`)、`28` 轮、`WL = 3,091,266`、`pips = 5005128`。
+  - **`k_140000fd_500000lut`（`2×V100`）**：`E2E = 62.94 s` (`69.95`)、`Route design = 30.25 s` (`32.87`)、`9` 轮、`pips = 3684717`。
+  - **`k_100_dsp`（`2×V100`）**：`E2E = 69.15 s` (`69.61`)、`Route design = 34.26 s` (`37.17`)、`10` 轮、`pips = 3645515`。
+  - **`k_800_ram`（`2×V100`）**：`Route design = 54.88 s`（较 `v70 60.50 s` 快 `-5.62 s`），`12` 轮、`pips = 10463348`；但并发宿主负载（`load=12.38`）与 NUMA-1 半核束缚导致 `Read Netlist & PhysDB` 涨至 `207.77 s`（`E2E = 297.83 s`）。
+  - **其余 6 例（`mcml_RLE` `28.77 s`、`RLE_BlobMerging` `24.69 s`、`oc_des_des3perf` `46.67 s`、`aquarius_b15_1` `47.64 s`、`RS8FreqDecode` `45.59 s`、`k_300dsp_300ram` `94.89 s`）**：全部 `over=0` 且进程内/冷启双盲 `unroutedPins=0 sharedPipNodes=0` 一致通过；同时定位到中小用例端到端主要固定税为 **`F4_V67_PRELOAD (12.2 s)` + `resident_preflight (~11.5 s)`**（超过其 `3.5–4.1 s` 读盘与 `15–19 s` 布线总和）。
+
 ---
 
-## 4. `v77` 优化方向与全 13 用例推进计划
+## 4. `v77` 优化方向与下一步推进计划
 
-基于 **`v76`（当前线上最优：`THEIA_50per = 719.80 s` / `Route design = 601.24 s`）**：
-1. **用 `v76` 完成全 13 用例基线评测与回归验证**（`scripts/all13/run_all13.py --engine v76` 复用 `all13-rrg-cache`，重点复测 `THEIA_20per` 观察 `NodeGeomHot + slotForRead` 对 `366.99 s` 的进一步压缩）；
-2. **针对 `R1–2 corridor_s`、`RWRoute.preprocess`（`16.83 s`）、`Initialization`（`22.25 s`）、`V37_MATERIALIZE + POST`（`~27 s`）及 CPU `R3–5` / `R18–52` 微架构热路径继续向 PPT `517.28 s` 逼近**：
-   - 将 `F1Corridor.Box` 扁平化为原始 `int[]`（消除 `R1 12.30 s` 的对象创建与 `IdentityHashMap`）；
-   - 将 `G.dyn`（`8B` 中的只读 `hist` 与原子写 `occ` 分离，避免同一 cache line 被 `addToScope`/`ripUp` invalidation）；
-   - 继续拆解 `V37_MATERIALIZE` / `fixRoutes`（`7.96 s`）与 `Write XDEF`（`24.45 s`）。
+基于 **`v76`（`THEIA_50per = 719.80 s` / `Route design = 601.24 s`、全 13 例 `13/13` 通过且 `all13-rrg-cache` 已全部建全）**：
+1. **针对 `THEIA_50per` 与中大用例冲刺 PPT `517.28 s`**：
+   - 将 `G.dyn`（8B 中只读 `hist` 与原子写 `occ` 分离，消除同一 cache line 被 `addToScope`/`ripUp` 导致的缓存行失效）；
+   - 将 `F1Corridor.Box` 扁平化为原始 `int[]`（消除 `R1 12.30 s` 的对象创建与 `IdentityHashMap` 成本）；
+   - 继续拆解 `V37_MATERIALIZE` / `fixRoutes`（`7.96 s`）、`Initialization (22.25 s)` 与 `preprocess (16.83 s)`，并在四卡空闲时用 `--engine v76`/`v77` 复跑 `THEIA_20per` 与全 13 例验证四卡上限（`all13-rrg-cache` 零导出开销）。
+2. **压缩中小用例固定启动税（`~24 s -> <5 s`）**：恢复全 NUMA CPU 亲和再读 DCP（避免 `k_800_ram` 半核读盘慢），并按 `Read DCP` / 连接数按需轻量跳过或裁剪全芯片 `87M` 节点预热与 `resident_preflight`。
