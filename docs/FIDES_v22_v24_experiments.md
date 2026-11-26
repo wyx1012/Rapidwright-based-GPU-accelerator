@@ -873,11 +873,56 @@
     - `Post (assign=2.11 s, fix=7.35 s, srcPin=2.03 s, SETPIPS=7.52 s, CHECKPIPS=1.31 s, STATS_WL=3.97 s, materialize=13.69 s [seq_fix=0])`；
     - `Total wirelength = 19,001,226`、`Nodes popped = 27,022,101,815`（`gpu=18,657,271,619, cpu=8,364,830,196`）、`dcp_sha256`：`6217faa7cef881c52ce1e82c91e5063af7a1fde1ff5ca3934021dfdf0347299d`。
 
+### 2.51 `theia50per-ppt-hybrid-v71`（**前处理真瓶颈精测命中 `makePhys=11.73 s + missingPins=5.78 s`、`R1–5 = 185.97 s (-6.94 s)`；于 `R70` 停止归档并定位 `Pass 3 min=1024 / 6M bypass / 无 wideRetry` 引发 `R16–52` 拥塞抬升**）
+- **改动文件**：`scratch/v71/` 下 `fides_cpu.cpp`、`v71_patch.py`、`prepare_v71.py`、`deploy_v71.py`、`launch_v71.py`、`record_rounds_v71.py`。
+- **核心改动（基于 `v70`）**：
+  1. `fides_cpu.cpp`：`4×V100` 下屏蔽 `Tier-B1 Wide (16M)` GPU 重试、将 `Pass 3` 异步 CPU 旁路门槛由 `12M` 降至 `6M`、将 `4` 卡 `minGpuPass3` 由 `512` 提至 `1024`；微尾将 `microTailRegime` 放宽至 `overNow <= 1u && activeCount <= 4`（`maxUnbounded=1`）；
+  2. `v71_patch.py`：`PartialRouter.main` 与 `RWRoute` 将 `STATS_WL (3.97 s)`、`checkPIPsUsage (1.31 s)` 并入 `writeCheckpoint` 并发期并跳过重复 `warmTilePIPs`，同时在 `RWRoute.preprocess` 打点拆分 `makePhys / staticPins / missingPins`。
+- **编译与冒烟**：4 份编译日志均 `0 B`；`V71_SMOKE_PASS dlopen_ok=1 all_syms=1` 且 `V71_LOAD_DRIVE_DRYRUN_PASS`；`cpp_sha256`：`822c4a0418d5b982c685941cc80207fbe2b27e1dd34f6a1b972ab68350adb7ed`，`cuda_sha256`：`bf00a48ae8a6e34bb1c1661fe396354cdf550176e7a9793340bfc4663b99034f`。
+- **实测与停止归因（`2026-11-26T09:49:09.14` 启动于 `4×V100 [GPU 0/1/2/3]`，推至 `R70 sum_cpp=847.50 s` 后手动终止并清理干净）**：
+  - **关键量化收获**：① **`F4_V71_PREPROC makePhys=11.73s staticPins=1.63s missingPins=5.78s`** 明确证明 `rwPre=19.15s` 的主瓶颈是 `makePhysNetNamesConsistent`（内部 `getParentNetMap()` 与 `synchronized(design)`）及 `createMissingSitePinInsts`（`5.78 s`），而非仅占 `1.63 s` 的 `staticPins`；② `Read Netlist & PhysDB = 38.978 s / Total = 42.853 s`、`R3–5 = 122.13 s`（较 `v70 -7.85 s`）。
+  - **负向归因**：将 `Pass 3` 门槛抬高到 `1024` + `6M bypass` + 去 `wideRetry` 后，`R16–17` 回退 CPU 耗时反由 `6.90/7.37 s` 升至 `10.32/11.04 s`（`R20 over 508→578`、`R52 over 50→121`），导致 `R6–52` 扩至 **`363.66 s`**（vs `v70 327.49 s`）；且 `R67 (over=1, mult=12.0)` 后 `R68` 因 `128` 邻域围绕 `12×` 高代价节点绕行反跳 `over=1→12`（`R68–70 = 116.05 s`）。**`v72` 立即回锚 `v70` 经验证的 C++ 参数，先兑现 `v71_patch.py` 后处理/写出重叠收益。**
+
+### 2.52 `theia50per-ppt-hybrid-v72`（**回锚 `v70` C++ + 实测 `v72_patch` 后处理并行重叠 `dcp_legality PASS`（`pips=31103661`）；暴露“72 线程双池抢核拖慢 `Write EDIF`”及“`v70` `6×/12×` 尾盘放大倍率存在随机 `over=1→16` 波动”两大根因**）
+- **改动文件**：`scratch/v72/` 下 `fides_cpu.cpp`（与 `v70` 逐字节一致）、`v72_patch.py`、`prepare_v72.py`、`deploy_v72.py`、`launch_v72.py`、`record_rounds_v72.py`。
+- **核心改动**：在 `v70` 完整 C++/CUDA 引擎上叠加 `v72_patch.py`（跳过 `RWRoute.setPIPsOfNets` 中重复的 `getAllTiles` 预热与 `checkPIPsUsage`、跳过 `PartialRouter.main` 重复 `warmTilePIPs`、将 `STATS_WL` 移入 `writeCheckpoint` 并发期）。
+- **编译与冒烟**：4 份编译日志均 `0 B`；`V72_SMOKE_PASS dlopen_ok=1 all_syms=1` 且 `V72_LOAD_DRIVE_DRYRUN_PASS`；`cpp_sha256`：`331617c39a1844390959a66e86beb8ef4d5450a684d477a2fc0e217b98895692`。
+- **全流程实测结果（`2026-11-26T10:11:42.07 -> 10:35:33.43`，`4×V100 [GPU 0/1/2/3]`，`status="passed", stage="complete", legality_mode="in_process_parallel_with_write"`）**：
+  - **合法性与功能验证**：`F4_BASE_DCP unroutedPins=0 sharedPipNodes=0 pips=31103661`、`Total wirelength = 19,026,610`、`trackChanges=false`、`tileTypes=0`（成功跳过重复扫描）。
+  - **负向根因定位 1（72 线程双池抢核拖慢写盘）**：`PartialRouter.main` 同时开着 `checkPool (36 线程)`、`statsFuture (f4SharedPool 35 线程)` 与 `writeCheckpoint` 主线程（总活跃线程 `> 72 > 36 核`），导致 CPU/内存带宽严重踩踏——`Write EDIF` 从 `8.69 s` 膨至 **`22.86 s`**、`Write EDIF & XDEF` 从 `14.78 s` 膨至 **`31.54 s`**、`STATS_WL` 从 `3.97 s` 膨至 **`26.09 s`**（`overlap_wall = 32.44 s`）。**修正方法**：让 `checkFuture` 与 `STATS_WL` 共用**同一个 `34` 线程池串行执行**（`2.3 + 4.0 = 6.3 s`），彻底消除超订阅并完整藏进 `15 s` 写盘窗口。
+  - **负向根因定位 2（`v70` 尾盘 `6×/12×` 提权 + `128` 邻域拆线的强方差）**：相同 `v70` C++ 代码下，`R1–52 = 575.34 s`（`R1–2=66.65s, R3–5=140.49s, R6–52=368.20s`），尾盘 `R53–83` 高达 **`617.10 s`**（`83` 轮才清零、`Route design = 1,300.59 s`、`E2E = 1,430.17 s`）：在 `R65` (`over=1`) → `R66–67` (`act=2, over=4→16`)、`R71` (`over=1`) → `R72` (`over=5`)、`R73` (`over=1`) → `R74` (`over=14`) 连续三次发生“对单点 `over=1` 叠 `6×/12×` 历史倍率 + 同轮拆 `128` 条邻居 + `2` 路并发 `0/-1`”导致的拥塞反跳，直至 `R78` 放开后于 `R83` 清零（`0.14 s`）。
+
+### 2.53 `theia50per-ppt-hybrid-v73`（**`4×V100` 再刷全局最快新纪录：`E2E = 757.90 s`（`12m 37.90s`，较 `v70` 再降 `-41.08 s`、领先 PPT Slide 15 `807.24 s` 达 `-49.34 s`）！`Route design = 638.97 s`、`57` 轮极速清零（`R53–57 = 0.88 s`）、`WL = 18,964,265`（更短）、双盲冷启 `F4BaselineDcpCheck` `pips=31071296` 零违例，并原生解除 `F2Prewarm` 硬编码兼容 13 用例**）
+- **改动文件**：`scratch/v73/` 下 `fides_cpu.cpp`、`v73_patch.py`、`prepare_v73.py`、`deploy_v73.py`、`launch_v73.py`、`record_rounds_v73.py`。
+- **核心改动**：
+  1. **通用尾部收敛去抖动（同时兼顾 `THEIA_50per` 与 `THEIA_20per` `over=5..16` 长尾、`fides_cpu.cpp` 第 3896–3901、3995、4274 行）**：
+     - 收窄邻域重拆规模：`maxNbrNet=64`、`maxNbrPops=widenNbr ? 60000 : 50000`、`nbrDx=widenNbr ? 3 : 2`、`nbrDy=widenNbr ? 6 : 4`，并将 `nbrLim` 从 `128u` 严格收窄为 `(routeIter >= 72 && G.lastTailFbCount > 0) ? 64u : (microScope ? 20u : (widenNbr ? 36u : 32u))`（消除无论 `over<=2` 还是 `over=5..16` 下整批撕毁 128 条无辜大网引发的反跳与 30–74 s/轮耗散）；
+     - `maxUnboundedThisRound = (routeIter >= 78) ? 8 : 1;`（禁止 `over=1` 同轮双无界互踩）；
+     - `microMult = !microStuck ? 1.0f : ((G.microStuckRounds >= 2) ? 3.0f : 2.0f);`（温和历史排斥取代 `6×/12×` 冲击）；
+  2. **单线程池顺序 `check + STATS_WL` 重叠（`v73_patch.py`）**：保留跳过重复 `warmTilePIPs`、`getAllTiles` 与 `checkPIPsUsage`，将 `checkPool` 工人上限设为 `<= 34`（为 `writeCheckpoint` 预留 2 核），并在 `checkFuture` 内完成 64 分片校验后顺序执行 `deferredRouter.fidesRunDeferredStats()`，彻底避免 `v72` 72+ 线程超订阅；
+  3. **移除 `F2Prewarm` 硬编码（`v73_patch.py`）**：将 `indirectCount != 4_909_155 || nAll != 4_952_719` 放宽为通用下界检查 `indirectCount < 0 || nAll <= 0`，使 `v73` 原生兼容全部 13 个竞赛测例。
+- **编译与冒烟**：4 份编译日志均 `0 B`；`V73_SMOKE_PASS`（`libfides_cpu.so` 全 JNI 符号 + `javap` 检查通过）；`worker_sha256`：`686e93d124b29ec3ccfa11c5775d28180680d3927fddbe0c4ecc10b139fd5198`，`cpp_sha256`：`5328d897dfc106f6a4521b47a07e9d54a6a005eab80f48bdfaf8b60723ba78bb`，`cuda_sha256`：`12c504208474d1f8bb5c3a336e4c615fc6f11ea2c52d6b89711c86c8387bcb09`，`fides_gpu_cu_sha256`：`47c9a1c298fe557831a0dd9abc03f73143fc80a128d5e0903fd3c78848807e8c`。
+- **全流程实测与双盲复核结果（`2026-11-26T15:38:16.46 -> 15:50:55.47`，`4×V100 [GPU 0/1/2/3]`，`status="passed", stage="complete", legality_mode="in_process_parallel_with_write"`）**：
+  - **最新全局最优里程碑**：
+    - **`E2E = 757.90 s`（`12m 37.90s`）** —— 较 `v70 (798.97 s)` 再降 **`-41.08 s`**、较 `v66 (915.55 s)` 大降 **`-157.65 s`**、**反超 PPT Slide 15 (`807.24 s`) 达 `-49.34 s`**；
+    - **`Route design = 638.97 s`**（`Init 20.25 s + Routing 618.72 s`）—— 较 `v70 (684.62 s)` 再降 **`-45.65 s`**；
+    - **`route_wall = 755.27 s`**（外置税仅 `2.63 s`，含 `resident_preflight = 0.075 s`）；
+    - **尾盘 `57` 轮闪电收敛（`R53–57` 仅 **`0.88 s`** vs `v70 60.83 s`！）**：`R53` (`over=22, 0.42s`) → `R54` (`over=16, 0.07s`) → `R55` (`over=2, mult=2.0, 0.22s`) → `R56` (`over=1, mult=3.0, routed=52, 0.11s`) → `R57` (`over=0, routed=35, pops=15,835, 0.06s`)；
+    - **`F4_V66_INPROC_DCP_CHECK pins=5.48s overlap_wall=20.57s write_s=20.57s check_s=3.01s stats_s=9.11s`**：`3.01 s` 校验与 `9.11 s` 延迟统计均被单池串行藏入 `20.57 s` 写盘窗口（零线程打架），输出 `F4_BASE_DCP unroutedPins=0 sharedPipNodes=0 pips=31071296`；
+    - **冷启双盲复核（`cold_dcp_doublecheck.log`）100% 逐字一致**：`Read=80.97s, pins=2.80s, pip_shards=2.34s, unrouted_scan=0.53s`，输出 **`F4_BASE_DCP unroutedPins=0 sharedPipNodes=0 pips=31071296`**。
+  - **其余全口径汇总**：
+    - `F4_V67_PRELOAD (java_s=11.94, cpp_s=11.85, wall_s=12.10)`（藏入 `Read Netlist & PhysDB = 48.281 s`）、`F4_V71_PREPROC (makePhys=11.72s, staticPins=1.41s, missingPins=4.75s)` → `rwPre=17.88s, updatePins=2.69s`、`UNROUTED=1.03s`、`PRE f2=3.42s directPre=0.54`、`SORT=1.44s`、`GATE_OPEN=0.01s`、`PORTALS=0.35s`；
+    - `R1–2 = 64.33 s`、`R3–5 = 130.44 s`、`R6–52 = 344.82 s` → `R1–52 = 539.59 s`，`R53–57 = 0.88 s`，`sum_cpp = 540.47 s`（`v37_gpu_pops=18,887,424,403, gpu_ns=186.73 s, gpu_waves=1,863`）；
+    - `Post (assign=3.00 s, fix=6.95 s, srcPin=1.81 s, SETPIPS=5.58 s, CHECKPIPS=跳过)`、`STATS_WL=9.11 s`（写盘期隐藏）、`Write EDIF & XDEF=19.690 s`；
+    - `Total wirelength = 18,964,265`（较 `v70 -36,961`）、`Nodes popped = 27,124,486,998`、`dcp_sha256`：`bcaf6cea9a625b8de1102e148d1eb2851602bcfb3323473ad588b04c8214ba40`。
+
 ---
 
-## 4. 面向 PPT Slide 19 (`517.28 s`) 的下一阶段冲击规划（基于 `v70 = 798.97 s`）
+## 4. 面向全 13 用例复测与 PPT Slide 19 (`517.28 s`) 的下一步规划
 
-`v70` 已以 **`798.97 s` (`Route = 684.62 s`)** 跨过 `807.24 s` 里程碑，当前剩余差距（对比 Slide 19 `517.28 s`，`~281.7 s`）全部集中在以下三大主战场：
-1. **中段 `R3–5` CPU `p1`（`129.98 s`）+ `R6–18` GPU `p3`（总 `p3=309.42 s`）**：引入 Slide 21 规划的**精确稀疏工作表与边描述符 `SoA`**（压缩 `36` 核/多卡随机访存），并探索 `R3` 高扇出网子段的多卡 `GPU` 协同或更紧走廊裁剪；
-2. **前处理 `RWRoute.preprocess`（`19.54 s`）**：并发化/精简 `DesignTools.createPossiblePinsToStaticNets` 与静态物理网扫描；
-3. **后处理 `Post + SetPIPs + Materialize`（合计 `~38 s`）**：将 `F4_V66_POST`、`SETPIPS`、`STATS_WL` 与局部 `writeCheckpoint` 更深流水重叠，并持续压缩 `Read DCP`（`42–46 s`）I/O 与 EDIF/XDEF 解析。
+基于 `v73` 在 `THEIA_50per` 上取得 **`E2E = 757.90 s`（尾盘 `0.88 s`）** 的实证突破，下一步推进顺序：
+1. **将 `v73` 部署并复测 `THEIA_20per`（及全 13 用例）**：验证收窄的 `nbrLim (20–36u)`、`maxNbrNet=64` 与柔和 `microMult (2×/3×)` 是否如预期大幅砍掉 `THEIA_20per` 在 `v70` 下耗时 `762.90 s` 的 `R54–74` 尾盘拉锯，同时让 [run_all13.py](file:///E:/AntigravityUsage/Rapidwright-based-GPU-accelerator/scripts/all13/run_all13.py) 直接复用通用 `v73`（并避免重复 RRG 导出浪费）；
+2. **中段核心继续向 PPT `517.28 s` 下探**（参见 [NEXT_OPTIMIZATION_PLAN.md](file:///E:/AntigravityUsage/NEXT_OPTIMIZATION_PLAN.md)）：
+   - `makePhysNetNamesConsistent` (`11.72 s`) 与 `createMissingSitePinInsts` (`4.75 s`) 并行/减锁优化；
+   - **`R3–5 p1` 与 `R6–52 p3` 稀疏工作表 + 边描述符 `SoA`**（目标再降 `150–200 s`）；
+   - **`writeCheckpoint` + 后处理与特征重叠压缩**（目前 `Write EDIF & XDEF = 19.69 s`，可进一步检查 CPU 核配比与特征写入）。

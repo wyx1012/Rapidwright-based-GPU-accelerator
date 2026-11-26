@@ -762,6 +762,9 @@ public class PartialRouter extends RWRoute {
      * @param design The {@link Design} instance to be examined.
      * @return A list of unrouted SitePinInst objects.
      */
+    static volatile boolean fidesOverlapPostActive = false;
+    static volatile RWRoute fidesLastRouter = null;
+    static volatile com.xilinx.rapidwright.device.Device fidesWarmedDevice = null;
     private static volatile java.util.concurrent.CompletableFuture<Void> v67PreloadFuture;
 
     private static String extractFlagValue(String[] args, String flag) {
@@ -832,8 +835,10 @@ public class PartialRouter extends RWRoute {
     }
 
     private static void warmTilePIPs(Design design) {
+        com.xilinx.rapidwright.device.Device dev = design.getDevice();
+        if (fidesWarmedDevice == dev) return;
         var warmedTiles = new HashSet<Object>();
-        for (com.xilinx.rapidwright.device.Tile tile : design.getDevice().getAllTiles()) {
+        for (com.xilinx.rapidwright.device.Tile tile : dev.getAllTiles()) {
             if (warmedTiles.add(tile.getTileTypeEnum())) {
                 tile.getPIP(0, 0);
                 if (tile.getWireCount() > 0) {
@@ -841,6 +846,7 @@ public class PartialRouter extends RWRoute {
                 }
             }
         }
+        fidesWarmedDevice = dev;
     }
 
     private static List<Net> updatePinsIsRoutedParallel(Design design, java.util.concurrent.ForkJoinPool pool, int workers) {
@@ -1003,6 +1009,8 @@ public class PartialRouter extends RWRoute {
         String[] rwrouteArgs = Arrays.copyOfRange(args, 2, args.length);
         F2Prewarm.start();
         startV67Preload(rwrouteArgs);
+        fidesOverlapPostActive = !Boolean.getBoolean("fides.v66.skipInprocDcpCheck");
+        fidesLastRouter = null;
         try {
             Design routed = routeDesignWithUserDefinedArguments(Design.readCheckpoint(args[0]), rwrouteArgs);
             if (Boolean.getBoolean("fides.v66.skipInprocDcpCheck")) {
@@ -1010,7 +1018,7 @@ public class PartialRouter extends RWRoute {
                 System.out.println("\nINFO: Wrote routed design\n " + routedDCPfileName + "\n");
             } else {
                 long tPin0 = System.nanoTime();
-                final int workers = Math.max(1, Math.min(36, Runtime.getRuntime().availableProcessors()));
+                final int workers = Math.max(1, Math.min(34, Runtime.getRuntime().availableProcessors() - 2));
                 final java.util.concurrent.ForkJoinPool checkPool = new java.util.concurrent.ForkJoinPool(workers);
                 try {
                     final List<Net> allNets = updatePinsIsRoutedParallel(routed, checkPool, workers);
@@ -1065,7 +1073,14 @@ public class PartialRouter extends RWRoute {
                         long sharedCount = shared.size();
                         long totalPips = pipsAdder.sum();
                         long chkNs = System.nanoTime() - tChk0;
-                        return new long[] { unroutedPins, sharedCount, totalPips, chkNs };
+                        final RWRoute deferredRouter = fidesLastRouter;
+                        long statsNs = 0L;
+                        if (deferredRouter != null) {
+                            long tS0 = System.nanoTime();
+                            deferredRouter.fidesRunDeferredStats();
+                            statsNs = System.nanoTime() - tS0;
+                        }
+                        return new long[] { unroutedPins, sharedCount, totalPips, chkNs, statsNs };
                     }, checkPool);
 
                     long tWr0 = System.nanoTime();
@@ -1073,9 +1088,14 @@ public class PartialRouter extends RWRoute {
                     long tWr1 = System.nanoTime();
                     long[] chk = checkFuture.get();
                     long tEnd = System.nanoTime();
+                    if (chk[0] != 0L || chk[1] != 0L || chk[2] <= 0L) {
+                        throw new IllegalStateException(String.format(
+                                "In-process DCP check failed: unrouted=%d shared=%d pips=%d",
+                                chk[0], chk[1], chk[2]));
+                    }
                     System.out.printf(
-                            "F4_V66_INPROC_DCP_CHECK pins=%.2fs overlap_wall=%.2fs write_s=%.2fs check_s=%.2fs%n",
-                            (tPin1 - tPin0) / 1e9, (tEnd - tWr0) / 1e9, (tWr1 - tWr0) / 1e9, chk[3] / 1e9);
+                            "F4_V66_INPROC_DCP_CHECK pins=%.2fs overlap_wall=%.2fs write_s=%.2fs check_s=%.2fs stats_s=%.2fs%n",
+                            (tPin1 - tPin0) / 1e9, (tEnd - tWr0) / 1e9, (tWr1 - tWr0) / 1e9, chk[3] / 1e9, chk[4] / 1e9);
                     System.out.printf("F4_BASE_DCP unroutedPins=%d sharedPipNodes=%d pips=%d%n",
                             chk[0], chk[1], chk[2]);
                     System.out.println("\nINFO: Wrote routed design\n " + routedDCPfileName + "\n");

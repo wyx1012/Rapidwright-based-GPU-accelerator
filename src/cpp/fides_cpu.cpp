@@ -3893,11 +3893,12 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             for (U32 ci : clusterConns) inAct[ci] = 1u;
             int chunks = std::max(1, EXEC.numWorkers + 1);
             U32 step = (totalConns + chunks - 1u) / chunks;
-            const I32 maxNbrNet = widenNbr ? 128 : 64;
-            const I64 maxNbrPops = widenNbr ? 120000 : 50000;
-            const I32 nbrDx = widenNbr ? 4 : 2;
-            const I32 nbrDy = widenNbr ? 8 : 4;
-            const size_t nbrLim = widenNbr ? 128u : 48u;
+            const bool microScope = (routeIter >= 58 && G.overusedList.size() <= 2u);
+            const I32 maxNbrNet = 64;
+            const I64 maxNbrPops = widenNbr ? 60000 : 50000;
+            const I32 nbrDx = widenNbr ? 3 : 2;
+            const I32 nbrDy = widenNbr ? 6 : 4;
+            const size_t nbrLim = (routeIter >= 72 && G.lastTailFbCount > 0) ? 64u : (microScope ? 20u : (widenNbr ? 36u : 32u));
             struct NbrCand { I64 score; U32 connIdx; };
             std::vector<std::vector<NbrCand>> chunkCands(chunks);
             BoundaryPool::runChunks(chunks, [&](int c) {
@@ -3991,7 +3992,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         const size_t overNow = G.overusedList.size();
         const bool microTailRegime = (routeIter >= 55 && overNow <= 1u && activeCount <= 2);
         const bool microStalled = microTailRegime && (G.lastTailFbCount > 0 || G.microStuckRounds >= 1);
-        const int maxUnboundedThisRound = (routeIter >= 78) ? 8 : (microStalled ? 2 : 1);
+        const int maxUnboundedThisRound = (routeIter >= 78) ? 8 : 1;
         for (I32 idxPos : tailOrder) {
             U32 connIdx = clusterConns[idxPos];
             const bool isAct = (idxPos < activeCount);
@@ -4270,7 +4271,7 @@ JNIEXPORT jint JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     const bool microStuck = (routeIter >= 55 && !G.overusedList.empty() && G.overusedList.size() <= 2u && G.lastTailFbCount == 0);
     if (microStuck) ++G.microStuckRounds;
     else G.microStuckRounds = 0;
-    const float microMult = !microStuck ? 1.0f : ((G.microStuckRounds >= 2) ? 12.0f : 6.0f);
+    const float microMult = !microStuck ? 1.0f : ((G.microStuckRounds >= 2) ? 3.0f : 2.0f);
     if (microStuck) {
         fprintf(stdout, "F4_V68_MICRO_STUCK iter=%d over=%zu streak=%d mult=%.1f\n",
                 routeIter, G.overusedList.size(), G.microStuckRounds, microMult);

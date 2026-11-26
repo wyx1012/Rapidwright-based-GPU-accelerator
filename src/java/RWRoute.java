@@ -294,10 +294,15 @@ public class RWRoute {
             throw new RuntimeException(getUnsupportedSeriesMessage(design.getPart()));
         }
 
-        // Pre-processing of the design regarding physical net names pins
+        long tPre0 = System.nanoTime();
         DesignTools.makePhysNetNamesConsistent(design);
+        long tPre1 = System.nanoTime();
         DesignTools.createPossiblePinsToStaticNets(design);
+        long tPre2 = System.nanoTime();
         DesignTools.createMissingSitePinInsts(design);
+        long tPre3 = System.nanoTime();
+        System.out.printf("F4_V71_PREPROC makePhys=%.2fs staticPins=%.2fs missingPins=%.2fs%n",
+                (tPre1 - tPre0) / 1e9, (tPre2 - tPre1) / 1e9, (tPre3 - tPre2) / 1e9);
         if (series == Series.Versal) {
             DesignTools.updateVersalXPHYPinsForDMC(design);
         }
@@ -4497,9 +4502,11 @@ public class RWRoute {
         // Pre-warm TileType PIP lookup maps sequentially before concurrent reads in RouterHelper.getConnectionPIPs
         // (com.xilinx.rapidwright.device.i.a(int,int) lazily populates an unsynchronized HashMap on first touch).
         Set<Object> warmedTileTypes = new HashSet<>();
-        for (Tile tile : design.getDevice().getAllTiles()) {
-            if (warmedTileTypes.add(tile.getTileTypeEnum())) {
-                tile.getPIP(0, 0);
+        if (PartialRouter.fidesWarmedDevice != design.getDevice()) {
+            for (Tile tile : design.getDevice().getAllTiles()) {
+                if (warmedTileTypes.add(tile.getTileTypeEnum())) {
+                    tile.getPIP(0, 0);
+                }
             }
         }
         final List<NetWrapper> netList = new ArrayList<>(nets.values());
@@ -4566,9 +4573,12 @@ public class RWRoute {
                 builtPips[i] = null;
             }
         }
-        System.out.printf("F4_V37_SETPIPS nets=%d tileTypes=%d time_s=%.2f%n", nNets, warmedTileTypes.size(), (System.nanoTime() - t0) / 1e9);
+        System.out.printf("F4_V37_SETPIPS nets=%d tileTypes=%d trackChanges=%b time_s=%.2f%n",
+                nNets, warmedTileTypes.size(), trackChanges, (System.nanoTime() - t0) / 1e9);
 
-        checkPIPsUsage();
+        if (!PartialRouter.fidesOverlapPostActive) {
+            checkPIPsUsage();
+        }
     }
 
     /**
@@ -5910,14 +5920,24 @@ public class RWRoute {
         System.out.print(MessageGenerator.formatString(s, value));
     }
 
+    void fidesRunDeferredStats() {
+        computesNodeUsageAndTotalWirelength();
+        printNodeTypeUsageAndWirelength(config.isVerbose(), nodeTypeUsage, nodeTypeLength, design.getSeries());
+        printFormattedString("Total wirelength:", totalWL);
+    }
+
     protected void printRoutingStatistics() {
         // The exclusive loop upper bound leaves routeIteration one past the last
         // completed iteration when routing reaches its limit without converging.
         final int iterationsCompleted = Math.min(routeIteration, config.getMaxIterations() - 1);
         MessageGenerator.printHeader("Statistics");
-        computesNodeUsageAndTotalWirelength();
-        printNodeTypeUsageAndWirelength(config.isVerbose(), nodeTypeUsage, nodeTypeLength, design.getSeries());
-        printFormattedString("Total wirelength:", totalWL);
+        if (PartialRouter.fidesOverlapPostActive && goldenWriter == null) {
+            PartialRouter.fidesLastRouter = this;
+        } else {
+            computesNodeUsageAndTotalWirelength();
+            printNodeTypeUsageAndWirelength(config.isVerbose(), nodeTypeUsage, nodeTypeLength, design.getSeries());
+            printFormattedString("Total wirelength:", totalWL);
+        }
         if (config.isVerbose()) {
             printFormattedString("Total INT tile nodes:", totalINTNodes);
             printFormattedString("Total rnodes created:", routingGraph.numNodes());

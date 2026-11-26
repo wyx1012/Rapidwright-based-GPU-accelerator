@@ -1,0 +1,594 @@
+==============================================================================
+==                              PartialRouter                               ==
+==============================================================================
+==============================================================================
+==               Reading DCP: THEIA_50per_partial_routed.dcp                ==
+==============================================================================
+ XML Parse & Device Load:     2.468s
+    (Read PhysDB Caches):            (    1.459s)
+   (Read PhysDB Routing):            (    1.842s)
+F4_V37_IDMAP_CACHE loaded=true n=92497168 runs=276420 time_s=1.182
+FIDES_NATIVE_CPU v67 preinit_static=true N=92497168 M=391524527 time_s=11.84
+F4_V67_PRELOAD java_s=11.94 cpp_s=11.85 wall_s=12.10
+            (EDIF Parse):            (   34.858s)
+ (Read PhysDB Placement):            (   46.429s)
+(Read PhysDB Finalizing):            (    0.388s)
+   Read Netlist & PhysDB:    48.281s
+------------------------------------------------------------------------------
+         [No GC] *Total*:    50.749s
+F4_V71_PREPROC makePhys=11.72s staticPins=1.41s missingPins=4.75s
+F4_V67_PREPROC rwPre=17.88s updatePins=2.69s
+F4_V67_UNROUTED count=4952719 time_s=1.03
+INFO: Auto-tuned routing profile by design size (nodes=5767244, connections=4909155, bbox=12/60, initialPresentCongestionFactor=4.0)
+F1_PPT_INITIAL_OCCUPANCY ns=1535417612
+==============================================================================
+==                               Route Design                               ==
+==============================================================================
+F2_PREWARM mode=background rows=4952719 block=128 routerThread=1 cudaThread=23 contextScheduleNs=2486427 contextStartNs=5036197 contextReadyNs=553623668 geometryStartNs=92440525388 hostReadyNs=95503318269 waitStartNs=95503318269 waitEndNs=95503321449 overlapNs=548587471 moduleNs=3924940 uploadNs=40002074 kernelNs=1952224 downloadNs=75950732 freeBytes=33206566912 featureContextClosed=1
+F4_DIRECT_CUDA_DEVICE GPU-0f245cf2-a782-7ace-40a7-45f076f5d285
+F4_V66_PRE clk=0.00 static=0.25 preEst=0.00 f2=3.42 directPre=0.54
+F4_DIRECT_INPUT featureRows=4952719 cpuSearchBudget=0
+F3_ROUND_POLICY bytes=289282951 tier=huge budget=8000 coldFloorNs=38607847000
+INFO: Routing indirect connections iteratively
+      Max iterations: 100
+      Timing driven: false
+      LUT pin swapping: false
+      Bounding box extension: 12.0 60.0
+      Initial present congestion factor: 4.0
+F4_V66_SORT conns=4909155 time_s=1.44
+INFO: Sorting connections with strategy: HPWL_FIRST (HPWL asc -> fanout desc -> hashCode)
+------------------------------------------------------------------------------
+              Generated       RRG        Routed  Nodes With          Total Run
+Iteration     RRG Nodes  Time (s)   Connections    Overlaps           Time (s)
+---------  ----------------------   -----------  ----------   ----------------
+F4_V67_GATE_OPEN preloaded=true time_s=0.01
+=== FIDES LANE GATE ===
+lane impl: host -> com.xilinx.rapidwright.rwroute.FidesLaneHost (interface com.xilinx.rapidwright.rwroute.FidesLane)
+artifact: /home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-theia50per-snapshot-v1/rrg.bin  N=92497168 M=391524527 version=2 sections=18
+manifest: /home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-theia50per-snapshot-v1/rrg.manifest.txt  header=16 runs=276420 lines=92497184
+golden  : this run writes null; compared against (none given) lines=(none)  lane's line=1
+guard isVersal      : false (must be false)
+guard lutRoutethru  : false (must be false)
+guard timingDriven  : false (must be false)
+guard useBoundingBox: true
+guard useUTurnNodes : false
+oracle              : OFF (--fidesLaneVerify not given)
+pcc array identity  : lane.table == graph.presentCongestionCosts -> DIFFERENT (the lane was handed the live array, this is the .bin copy)
+pcc live[0..7]      : 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+pcc artifact[0..7]  : 1.0 5.0 9.0 13.0 17.0 21.0 25.0 29.0
+pcc length          : live=256 artifact=256
+PINFEED materialised: live=4559989 artifact=4698222  (not comparable: live counts only what the design load created, the artifact was measured after a forced full expansion -- see the per-expansion oracle line below)
+live rnodes         : 5767244 (numNodes=5767244)
+=== END GATE SETUP ===
+=== FIDES LANE MIRROR (initialised; the lane now reads the flat arrays) ===
+mirror: N=92497168 capacity=1 lines=5767244 unmapped=0  (occupancy sameNetCount historicalCongestionCost)
+FIDES_V40_GPU_DEV slot=0 dev=0 uuid=GPU-0f245cf2-a782-7ace-40a7-45f076f5d285 res=3.87GiB arena=23.31GiB free=4.16GiB taWarps=1024 tbCtas=80 init_s=2.24
+FIDES_V40_GPU_DEV slot=1 dev=1 uuid=GPU-81b72957-767e-40f3-b287-f427f1ad6528 res=3.87GiB arena=23.31GiB free=4.16GiB taWarps=1024 tbCtas=80 init_s=2.24
+FIDES_V40_GPU_DEV slot=2 dev=2 uuid=GPU-4c86a339-05a7-65da-76e1-98f51f23d1f7 res=3.87GiB arena=23.31GiB free=3.86GiB taWarps=1024 tbCtas=80 init_s=2.09
+FIDES_V40_GPU_DEV slot=3 dev=3 uuid=GPU-064b19f4-3201-bcb8-0cc1-5300ac970f97 res=3.87GiB arena=23.31GiB free=3.86GiB taWarps=1024 tbCtas=80 init_s=2.09
+FIDES_V37_GPU ready=true numGpus=4 dev=Tesla V100-PCIE-32GB uuid=GPU-0f245cf2-a782-7ace-40a7-45f076f5d285 res=3.87GiB arena=23.31GiB free=4.16GiB taWarps=4096 tbCtas=320 init_s=2.74
+FIDES_V67_NATIVE_ATTACH time_s=4.99
+FIDES_NATIVE_CPU ready=true N=92497168 M=391524527
+FIDES_NATIVE_CPU v37 registered=4909155 nets=858089 init_s=3.25
+F4_DIRECT_ROUND_1 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V66_PORTALS portals=1440 time_s=0.35
+F4_MULTI_SLR_CORRIDOR from=1 to=3 boundaries=2 source=74,434 sink=91,805 base=59	374	103	865 tight=59	427	96	812
+F4_V37_WAVE routed=504247/4909155 skip=0 gpu=504247 cpu=0 retries=61001 same_ok=0 overused=27595 pops=38425105 gpu_pops=38425105 gpu_ov=0 gpu_fb=0 gpu_s=0.31 t=1.7s
+F4_V37_WAVE routed=1006723/4909155 skip=0 gpu=1006723 cpu=0 retries=123773 same_ok=0 overused=106591 pops=136771365 gpu_pops=136771365 gpu_ov=0 gpu_fb=0 gpu_s=0.95 t=2.8s
+F4_V37_WAVE routed=1506206/4909155 skip=0 gpu=1506206 cpu=0 retries=164962 same_ok=0 overused=219698 pops=274032766 gpu_pops=274032766 gpu_ov=0 gpu_fb=0 gpu_s=1.89 t=4.3s
+F4_V37_WAVE routed=2006326/4909155 skip=0 gpu=2006326 cpu=0 retries=193226 same_ok=0 overused=356964 pops=394262226 gpu_pops=394262226 gpu_ov=0 gpu_fb=0 gpu_s=2.90 t=5.9s
+F4_V37_WAVE routed=2506774/4909155 skip=0 gpu=2506774 cpu=0 retries=221162 same_ok=0 overused=508858 pops=516566460 gpu_pops=516566460 gpu_ov=0 gpu_fb=0 gpu_s=3.96 t=7.7s
+F4_V37_WAVE routed=3007743/4909155 skip=0 gpu=3007743 cpu=0 retries=262473 same_ok=287663 overused=600468 pops=668449182 gpu_pops=668449182 gpu_ov=0 gpu_fb=0 gpu_s=5.68 t=10.3s
+F4_V37_WAVE routed=3504547/4909155 skip=0 gpu=3504547 cpu=0 retries=290574 same_ok=775025 overused=641922 pops=1020084781 gpu_pops=1020084781 gpu_ov=0 gpu_fb=0 gpu_s=7.43 t=12.8s
+F4_V37_WAVE routed=4003987/4909155 skip=0 gpu=4003987 cpu=0 retries=306817 same_ok=1265080 overused=688120 pops=1637610787 gpu_pops=1637610787 gpu_ov=0 gpu_fb=0 gpu_s=10.12 t=16.2s
+F4_V37_WAVE routed=4502497/4909155 skip=0 gpu=4502497 cpu=0 retries=316500 same_ok=1754649 overused=746379 pops=2662908703 gpu_pops=2662908703 gpu_ov=0 gpu_fb=0 gpu_s=14.39 t=21.5s
+F4_V37_PASS iter=1 p1_s=30.14 p2_n=7 p2_s=0.15 p3_n=2 p3_s=0.02 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=1 pick_s=0.01 meta_s=2.08 pack_s=1.09 p4a_s=0.76 p4b_s=2.71 p4c_s=0.84 mega_up=210 mega_pack_s=0.05 mega_gpu_s=0.27
+F4_V41_META iter=1 loop_s=0.14 sort_s=1.24 upw_s=0.32 live_s=0.00 build_s=0.38 dirty_n=212547909 patch_n=23428857 w_tot=2987163 p_tot=5233996
+F4_V37_GPU_ROUND iter=1 gpu_ok=4906406 wide_ok=0 cpu_ok=2749 gpu_pops=3854124515 cpu_pops=2210007 gpu_waves=765 gpu_ov=0 gpu_fb=0 gpu_s=20.20 total_s=30.87
+F4_V37_ROUND iter=1 active=4909155 routed=4909155 skip=0 gpu_ok=4906406 cpu_ok=2749 par=4909038 ser=117 retries=327700 same_ok=2153081 base_h=7 rel_h=2 fb=0 unrout=0 over=805365 excess=810265 pops=3856334522 gpu_pops=3854124515 waves=765 corridor_s=12.09 gpu_s=20.20 cpp_s=30.87
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":-1,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"DEFER_NO_PREVIOUS_ROUND","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":810265,"cpu_pops":3856334522,"resident_started":false,"attempts":4909155,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":805365,"observed_cpu_tail_pops":[0,0,0],"round":1,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+   1                  0      0.00       4909155      805365              43.23
+F4_DIRECT_ROUND_2 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_WAVE routed=507224/2763824 skip=112970 gpu=507224 cpu=0 retries=28466 same_ok=0 overused=582614 pops=340940443 gpu_pops=340940443 gpu_ov=0 gpu_fb=0 gpu_s=1.75 t=2.4s
+F4_V37_WAVE routed=1000851/2763824 skip=391516 gpu=1000851 cpu=0 retries=60345 same_ok=119299 overused=435682 pops=587812491 gpu_pops=587812491 gpu_ov=0 gpu_fb=0 gpu_s=4.60 t=6.0s
+F4_V37_WAVE routed=1501931/2763824 skip=596669 gpu=1501931 cpu=0 retries=69519 same_ok=602630 overused=358438 pops=1032042972 gpu_pops=1032042972 gpu_ov=0 gpu_fb=0 gpu_s=9.62 t=12.1s
+F4_V37_WAVE routed=2000000/2763824 skip=758439 gpu=2000000 cpu=0 retries=70279 same_ok=1084189 overused=315725 pops=1917268301 gpu_pops=1917268301 gpu_ov=0 gpu_fb=0 gpu_s=25.11 t=30.8s
+F4_V37_PASS iter=2 p1_s=33.36 p2_n=1 p2_s=0.00 p3_n=0 p3_s=0.00 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=2 pick_s=0.04 meta_s=2.59 pack_s=1.04 p4a_s=0.52 p4b_s=0.98 p4c_s=0.52 mega_up=18 mega_pack_s=0.01 mega_gpu_s=0.06
+F4_V41_META iter=2 loop_s=0.06 sort_s=2.09 upw_s=0.06 live_s=0.13 build_s=0.25 dirty_n=240292642 patch_n=19695587 w_tot=976092 p_tot=2093633
+F4_V37_GPU_ROUND iter=2 gpu_ok=2003757 wide_ok=0 cpu_ok=1627 gpu_pops=1926516087 cpu_pops=694923 gpu_waves=1011 gpu_ov=0 gpu_fb=0 gpu_s=26.29 total_s=33.46
+F4_V37_ROUND iter=2 active=2763824 routed=2005384 skip=758440 gpu_ok=2003757 cpu_ok=1627 par=2005150 ser=234 retries=70522 same_ok=1088394 base_h=1 rel_h=0 fb=0 unrout=0 over=315603 excess=316292 pops=1927211010 gpu_pops=1926516087 waves=1011 corridor_s=1.88 gpu_s=26.29 cpp_s=33.46
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":810265,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":316292,"cpu_pops":1927211010,"resident_started":false,"attempts":2005384,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":315603,"observed_cpu_tail_pops":[0,0,0],"round":2,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+   2                  0      0.00       2005384      315603              35.57
+F4_DIRECT_ROUND_3 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_WAVE_CPU routed=312952/1452750 skip=125933 par=312952 ser=0 retries=6821 same_ok=0 base_h=665 rel_h=0 overused=157345 pops=1000225883 t1=320432 t2=0 t3=0 busy=35 t=30.0s
+F4_V37_WAVE_CPU routed=500000/1452750 skip=320366 par=500000 ser=0 retries=9381 same_ok=0 base_h=773 rel_h=0 overused=120786 pops=1267521257 t1=510148 t2=0 t3=0 busy=35 t=36.7s
+F4_V37_PASS iter=3 p1_s=51.45 p2_n=780 p2_s=0.62 p3_n=0 p3_s=0.00 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=3 pick_s=0.01 meta_s=0.01 pack_s=0.00 p4a_s=0.01 p4b_s=0.00 p4c_s=0.00 mega_up=4 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=3 loop_s=0.00 sort_s=0.00 upw_s=0.01 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=583 p_tot=583
+F4_V37_GPU_ROUND iter=3 gpu_ok=553 wide_ok=0 cpu_ok=851085 gpu_pops=30366395 cpu_pops=1761975424 gpu_waves=2 gpu_ov=0 gpu_fb=0 gpu_s=0.57 total_s=52.22
+F4_V37_ROUND iter=3 active=1452750 routed=851638 skip=601112 gpu_ok=553 cpu_ok=851085 par=851110 ser=528 retries=11848 same_ok=100554 base_h=780 rel_h=0 fb=0 unrout=0 over=110333 excess=110382 pops=1792341819 gpu_pops=30366395 waves=2 corridor_s=0.54 gpu_s=0.57 cpp_s=52.22
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":316292,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":110382,"cpu_pops":1792341819,"resident_started":false,"attempts":851638,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":110333,"observed_cpu_tail_pops":[0,0,0],"round":3,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+   3                  0      0.00        851638      110333              52.95
+F4_DIRECT_ROUND_4 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_WAVE_CPU routed=182003/676299 skip=115485 par=182003 ser=0 retries=2874 same_ok=0 base_h=17684 rel_h=0 overused=44315 pops=1356138147 t1=189954 t2=0 t3=0 busy=35 t=30.0s
+F4_V37_PASS iter=4 p1_s=41.61 p2_n=17975 p2_s=2.93 p3_n=69 p3_s=0.70 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=4 pick_s=0.03 meta_s=0.63 pack_s=0.01 p4a_s=0.05 p4b_s=0.01 p4c_s=0.01 mega_up=80 mega_pack_s=0.10 mega_gpu_s=0.51
+F4_V41_META iter=4 loop_s=0.00 sort_s=0.01 upw_s=0.61 live_s=0.00 build_s=0.00 dirty_n=427346 patch_n=38046 w_tot=7598 p_tot=7810
+F4_V37_GPU_ROUND iter=4 gpu_ok=7111 wide_ok=0 cpu_ok=449149 gpu_pops=503455403 cpu_pops=1756350123 gpu_waves=6 gpu_ov=0 gpu_fb=0 gpu_s=2.16 total_s=45.28
+F4_V37_ROUND iter=4 active=676299 routed=456260 skip=220039 gpu_ok=7111 cpu_ok=449149 par=455672 ser=588 retries=7071 same_ok=130354 base_h=17975 rel_h=69 fb=0 unrout=0 over=41303 excess=41307 pops=2259805526 gpu_pops=503455403 waves=6 corridor_s=0.10 gpu_s=2.16 cpp_s=45.28
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":110382,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":41307,"cpu_pops":2259805526,"resident_started":false,"attempts":456260,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":41303,"observed_cpu_tail_pops":[0,0,0],"round":4,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+   4                  0      0.00        456260       41303              45.55
+F4_DIRECT_ROUND_5 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=5 p1_s=22.76 p2_n=23038 p2_s=5.63 p3_n=1934 p3_s=4.52 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=5 pick_s=0.04 meta_s=0.11 pack_s=0.01 p4a_s=0.03 p4b_s=0.00 p4c_s=0.01 mega_up=45 mega_pack_s=0.05 mega_gpu_s=0.03
+F4_V41_META iter=5 loop_s=0.00 sort_s=0.03 upw_s=0.08 live_s=0.00 build_s=0.00 dirty_n=1001294 patch_n=93230 w_tot=10426 p_tot=11118
+F4_V37_GPU_ROUND iter=5 gpu_ok=8531 wide_ok=0 cpu_ok=249252 gpu_pops=2066448784 cpu_pops=898514452 gpu_waves=10 gpu_ov=0 gpu_fb=0 gpu_s=9.93 total_s=32.94
+F4_V37_ROUND iter=5 active=398377 routed=257783 skip=140594 gpu_ok=8531 cpu_ok=249252 par=257153 ser=630 retries=5645 same_ok=89284 base_h=23038 rel_h=1934 fb=0 unrout=0 over=20992 excess=20995 pops=2964963236 gpu_pops=2066448784 waves=10 corridor_s=0.11 gpu_s=9.93 cpp_s=32.94
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":41307,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":20995,"cpu_pops":2964963236,"resident_started":false,"attempts":257783,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":20992,"observed_cpu_tail_pops":[0,0,0],"round":5,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+   5                  0      0.00        257783       20992              33.19
+F4_DIRECT_ROUND_6 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=6 p1_s=12.38 p2_n=10673 p2_s=3.10 p3_n=2264 p3_s=8.46 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=6 pick_s=0.02 meta_s=0.04 pack_s=0.01 p4a_s=0.01 p4b_s=0.00 p4c_s=0.00 mega_up=16 mega_pack_s=0.01 mega_gpu_s=0.01
+F4_V41_META iter=6 loop_s=0.00 sort_s=0.02 upw_s=0.02 live_s=0.00 build_s=0.00 dirty_n=567359 patch_n=52803 w_tot=5983 p_tot=6284
+F4_V37_GPU_ROUND iter=6 gpu_ok=4934 wide_ok=0 cpu_ok=130052 gpu_pops=1564164153 cpu_pops=451952266 gpu_waves=8 gpu_ov=0 gpu_fb=0 gpu_s=11.45 total_s=23.96
+F4_V37_ROUND iter=6 active=228058 routed=134986 skip=93072 gpu_ok=4934 cpu_ok=130052 par=134298 ser=688 retries=5439 same_ok=41973 base_h=10673 rel_h=2264 fb=0 unrout=0 over=14061 excess=14063 pops=2016116419 gpu_pops=1564164153 waves=8 corridor_s=0.13 gpu_s=11.45 cpp_s=23.96
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":20995,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":14063,"cpu_pops":2016116419,"resident_started":false,"attempts":134986,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":14061,"observed_cpu_tail_pops":[0,0,0],"round":6,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+   6                  0      0.00        134986       14061              24.23
+F4_DIRECT_ROUND_7 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=7 p1_s=14.99 p2_n=8667 p2_s=3.37 p3_n=3821 p3_s=16.69 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=7 pick_s=0.02 meta_s=0.03 pack_s=0.01 p4a_s=0.01 p4b_s=0.00 p4c_s=0.00 mega_up=8 mega_pack_s=0.00 mega_gpu_s=0.01
+F4_V41_META iter=7 loop_s=0.00 sort_s=0.01 upw_s=0.01 live_s=0.00 build_s=0.00 dirty_n=436719 patch_n=34668 w_tot=6581 p_tot=6851
+F4_V37_GPU_ROUND iter=7 gpu_ok=4821 wide_ok=0 cpu_ok=94411 gpu_pops=2016943234 cpu_pops=534495457 gpu_waves=7 gpu_ov=8 gpu_fb=8 gpu_s=14.61 total_s=35.07
+F4_V37_ROUND iter=7 active=137009 routed=99232 skip=37777 gpu_ok=4821 cpu_ok=94411 par=98687 ser=545 retries=4412 same_ok=41132 base_h=8667 rel_h=3821 fb=0 unrout=0 over=6165 excess=6165 pops=2551438691 gpu_pops=2016943234 waves=7 corridor_s=0.11 gpu_s=14.61 cpp_s=35.07
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":14063,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":6165,"cpu_pops":2551438691,"resident_started":false,"attempts":99232,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":6165,"observed_cpu_tail_pops":[0,0,0],"round":7,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+   7                  0      0.00         99232        6165              35.32
+F4_DIRECT_ROUND_8 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=8 p1_s=7.68 p2_n=5477 p2_s=2.43 p3_n=2479 p3_s=27.07 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=8 pick_s=0.01 meta_s=0.02 pack_s=0.01 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=7 mega_pack_s=0.00 mega_gpu_s=0.01
+F4_V41_META iter=8 loop_s=0.00 sort_s=0.01 upw_s=0.01 live_s=0.00 build_s=0.00 dirty_n=301638 patch_n=18493 w_tot=4481 p_tot=4524
+F4_V37_GPU_ROUND iter=8 gpu_ok=3185 wide_ok=0 cpu_ok=58557 gpu_pops=1395697230 cpu_pops=297113178 gpu_waves=7 gpu_ov=10 gpu_fb=10 gpu_s=10.25 total_s=37.19
+F4_V37_ROUND iter=8 active=87912 routed=61742 skip=26170 gpu_ok=3185 cpu_ok=58557 par=61202 ser=540 retries=3617 same_ok=35823 base_h=5477 rel_h=2479 fb=0 unrout=0 over=3969 excess=3970 pops=1692810408 gpu_pops=1395697230 waves=7 corridor_s=0.03 gpu_s=10.25 cpp_s=37.19
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":6165,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":3970,"cpu_pops":1692810408,"resident_started":false,"attempts":61742,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":3969,"observed_cpu_tail_pops":[0,0,0],"round":8,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+   8                  0      0.00         61742        3969              37.41
+F4_DIRECT_ROUND_9 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=9 p1_s=5.69 p2_n=3346 p2_s=1.68 p3_n=1769 p3_s=26.41 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=9 pick_s=0.01 meta_s=0.02 pack_s=0.01 p4a_s=0.02 p4b_s=0.00 p4c_s=0.01 mega_up=2 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=9 loop_s=0.00 sort_s=0.01 upw_s=0.01 live_s=0.00 build_s=0.00 dirty_n=117669 patch_n=12757 w_tot=3063 p_tot=3086
+F4_V37_GPU_ROUND iter=9 gpu_ok=2191 wide_ok=6 cpu_ok=44350 gpu_pops=1148942054 cpu_pops=198738216 gpu_waves=7 gpu_ov=23 gpu_fb=1 gpu_s=19.50 total_s=33.81
+F4_V37_ROUND iter=9 active=62007 routed=46541 skip=15466 gpu_ok=2191 cpu_ok=44350 par=46184 ser=357 retries=2069 same_ok=34715 base_h=3346 rel_h=1769 fb=0 unrout=0 over=2941 excess=2941 pops=1347680270 gpu_pops=1148942054 waves=7 corridor_s=0.03 gpu_s=19.50 cpp_s=33.81
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":3970,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":2941,"cpu_pops":1347680270,"resident_started":false,"attempts":46541,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":2941,"observed_cpu_tail_pops":[0,0,0],"round":9,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+   9                  0      0.00         46541        2941              33.98
+F4_DIRECT_ROUND_10 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=10 p1_s=4.75 p2_n=2269 p2_s=1.44 p3_n=1321 p3_s=26.09 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=10 pick_s=0.01 meta_s=0.01 pack_s=0.01 p4a_s=0.01 p4b_s=0.00 p4c_s=0.01 mega_up=3 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=10 loop_s=0.00 sort_s=0.01 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=115481 patch_n=10364 w_tot=2297 p_tot=2304
+F4_V37_GPU_ROUND iter=10 gpu_ok=1643 wide_ok=9 cpu_ok=38811 gpu_pops=837249068 cpu_pops=143242577 gpu_waves=6 gpu_ov=21 gpu_fb=1 gpu_s=17.60 total_s=32.29
+F4_V37_ROUND iter=10 active=51170 routed=40454 skip=10716 gpu_ok=1643 cpu_ok=38811 par=40285 ser=169 retries=1058 same_ok=33244 base_h=2269 rel_h=1321 fb=0 unrout=0 over=2346 excess=2347 pops=980491645 gpu_pops=837249068 waves=6 corridor_s=0.05 gpu_s=17.60 cpp_s=32.29
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":2941,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":2347,"cpu_pops":980491645,"resident_started":false,"attempts":40454,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":2346,"observed_cpu_tail_pops":[0,0,0],"round":10,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  10                  0      0.00         40454        2346              32.48
+F4_DIRECT_ROUND_11 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=11 p1_s=4.10 p2_n=1777 p2_s=1.29 p3_n=1065 p3_s=17.32 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=11 pick_s=0.01 meta_s=0.00 pack_s=0.00 p4a_s=0.01 p4b_s=0.00 p4c_s=0.00 mega_up=1 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=11 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=30985 patch_n=3733 w_tot=1871 p_tot=1904
+F4_V37_GPU_ROUND iter=11 gpu_ok=1340 wide_ok=0 cpu_ok=36459 gpu_pops=586864068 cpu_pops=134240625 gpu_waves=6 gpu_ov=11 gpu_fb=11 gpu_s=7.39 total_s=22.73
+F4_V37_ROUND iter=11 active=44595 routed=37799 skip=6796 gpu_ok=1340 cpu_ok=36459 par=37637 ser=162 retries=709 same_ok=32384 base_h=1777 rel_h=1065 fb=0 unrout=0 over=1893 excess=1893 pops=721104693 gpu_pops=586864068 waves=6 corridor_s=0.04 gpu_s=7.39 cpp_s=22.73
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":2347,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":1893,"cpu_pops":721104693,"resident_started":false,"attempts":37799,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":1893,"observed_cpu_tail_pops":[0,0,0],"round":11,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  11                  0      0.00         37799        1893              22.89
+F4_DIRECT_ROUND_12 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=12 p1_s=3.92 p2_n=1076 p2_s=1.40 p3_n=1378 p3_s=9.21 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=12 pick_s=0.01 meta_s=0.01 pack_s=0.00 p4a_s=0.01 p4b_s=0.01 p4c_s=0.00 mega_up=3 mega_pack_s=0.00 mega_gpu_s=0.01
+F4_V41_META iter=12 loop_s=0.00 sort_s=0.00 upw_s=0.01 live_s=0.00 build_s=0.00 dirty_n=62121 patch_n=6285 w_tot=1856 p_tot=1882
+F4_V37_GPU_ROUND iter=12 gpu_ok=1195 wide_ok=0 cpu_ok=33556 gpu_pops=804286581 cpu_pops=101075435 gpu_waves=5 gpu_ov=14 gpu_fb=14 gpu_s=10.48 total_s=14.54
+F4_V37_ROUND iter=12 active=41298 routed=34751 skip=6547 gpu_ok=1195 cpu_ok=33556 par=34687 ser=64 retries=423 same_ok=31089 base_h=1076 rel_h=1378 fb=0 unrout=0 over=1682 excess=1682 pops=905362016 gpu_pops=804286581 waves=5 corridor_s=0.03 gpu_s=10.48 cpp_s=14.54
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":1893,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":1682,"cpu_pops":905362016,"resident_started":false,"attempts":34751,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":1682,"observed_cpu_tail_pops":[0,0,0],"round":12,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  12                  0      0.00         34751        1682              14.79
+F4_DIRECT_ROUND_13 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=13 p1_s=1.32 p2_n=665 p2_s=0.93 p3_n=1288 p3_s=12.69 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=13 pick_s=0.00 meta_s=0.01 pack_s=0.00 p4a_s=0.01 p4b_s=0.00 p4c_s=0.01 mega_up=3 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=13 loop_s=0.00 sort_s=0.00 upw_s=0.01 live_s=0.00 build_s=0.00 dirty_n=25055 patch_n=2112 w_tot=1543 p_tot=1558
+F4_V37_GPU_ROUND iter=13 gpu_ok=1029 wide_ok=0 cpu_ok=8194 gpu_pops=657758781 cpu_pops=46952461 gpu_waves=5 gpu_ov=8 gpu_fb=8 gpu_s=10.44 total_s=14.96
+F4_V37_ROUND iter=13 active=37686 routed=9223 skip=28463 gpu_ok=1029 cpu_ok=8194 par=9221 ser=2 retries=236 same_ok=6562 base_h=665 rel_h=1288 fb=0 unrout=0 over=1445 excess=1445 pops=704711242 gpu_pops=657758781 waves=5 corridor_s=0.02 gpu_s=10.44 cpp_s=14.96
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":1682,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":1445,"cpu_pops":704711242,"resident_started":false,"attempts":9223,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":1445,"observed_cpu_tail_pops":[0,0,0],"round":13,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  13                  0      0.00          9223        1445              15.12
+F4_DIRECT_ROUND_14 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=14 p1_s=0.78 p2_n=531 p2_s=0.78 p3_n=1043 p3_s=6.22 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=14 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.01 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=14 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=4088 patch_n=1156 w_tot=1156 p_tot=1193
+F4_V37_GPU_ROUND iter=14 gpu_ok=836 wide_ok=0 cpu_ok=1531 gpu_pops=510190869 cpu_pops=26454063 gpu_waves=5 gpu_ov=11 gpu_fb=11 gpu_s=6.97 total_s=7.80
+F4_V37_ROUND iter=14 active=10197 routed=2367 skip=7830 gpu_ok=836 cpu_ok=1531 par=2367 ser=0 retries=156 same_ok=403 base_h=531 rel_h=1043 fb=0 unrout=0 over=1170 excess=1170 pops=536644932 gpu_pops=510190869 waves=5 corridor_s=0.03 gpu_s=6.97 cpp_s=7.80
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":1445,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":1170,"cpu_pops":536644932,"resident_started":false,"attempts":2367,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":1170,"observed_cpu_tail_pops":[0,0,0],"round":14,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  14                  0      0.00          2367        1170               7.97
+F4_DIRECT_ROUND_15 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=15 p1_s=0.66 p2_n=401 p2_s=0.67 p3_n=830 p3_s=11.10 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=15 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=15 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=301 patch_n=153 w_tot=900 p_tot=933
+F4_V37_GPU_ROUND iter=15 gpu_ok=646 wide_ok=0 cpu_ok=1342 gpu_pops=381834132 cpu_pops=28466294 gpu_waves=4 gpu_ov=7 gpu_fb=7 gpu_s=6.92 total_s=12.46
+F4_V37_ROUND iter=15 active=15605 routed=1988 skip=13617 gpu_ok=646 cpu_ok=1342 par=1986 ser=2 retries=137 same_ok=594 base_h=401 rel_h=830 fb=0 unrout=0 over=1021 excess=1021 pops=410300426 gpu_pops=381834132 waves=4 corridor_s=0.03 gpu_s=6.92 cpp_s=12.46
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":1170,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":1021,"cpu_pops":410300426,"resident_started":false,"attempts":1988,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":1021,"observed_cpu_tail_pops":[0,0,0],"round":15,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  15                  0      0.00          1988        1021              12.62
+F4_DIRECT_ROUND_16 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=16 p1_s=0.47 p2_n=319 p2_s=0.62 p3_n=686 p3_s=11.26 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=16 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=1 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=16 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=3349 patch_n=1264 w_tot=759 p_tot=788
+F4_V37_GPU_ROUND iter=16 gpu_ok=543 wide_ok=0 cpu_ok=731 gpu_pops=329358108 cpu_pops=22963017 gpu_waves=5 gpu_ov=4 gpu_fb=4 gpu_s=6.84 total_s=12.36
+F4_V37_ROUND iter=16 active=6025 routed=1274 skip=4751 gpu_ok=543 cpu_ok=731 par=1273 ser=1 retries=104 same_ok=23 base_h=319 rel_h=686 fb=0 unrout=0 over=915 excess=915 pops=352321125 gpu_pops=329358108 waves=5 corridor_s=0.02 gpu_s=6.84 cpp_s=12.36
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":1021,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":915,"cpu_pops":352321125,"resident_started":false,"attempts":1274,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":915,"observed_cpu_tail_pops":[0,0,0],"round":16,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  16                  0      0.00          1274         915              12.51
+F4_DIRECT_ROUND_17 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=17 p1_s=0.45 p2_n=258 p2_s=0.59 p3_n=573 p3_s=4.54 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=17 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=17 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=912 patch_n=311 w_tot=637 p_tot=659
+F4_V37_GPU_ROUND iter=17 gpu_ok=442 wide_ok=0 cpu_ok=1204 gpu_pops=273224941 cpu_pops=13988769 gpu_waves=4 gpu_ov=3 gpu_fb=3 gpu_s=5.11 total_s=5.59
+F4_V37_ROUND iter=17 active=4173 routed=1646 skip=2527 gpu_ok=442 cpu_ok=1204 par=1645 ser=1 retries=105 same_ok=468 base_h=258 rel_h=573 fb=0 unrout=0 over=805 excess=805 pops=287213710 gpu_pops=273224941 waves=4 corridor_s=0.02 gpu_s=5.11 cpp_s=5.59
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":915,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":805,"cpu_pops":287213710,"resident_started":false,"attempts":1646,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":805,"observed_cpu_tail_pops":[0,0,0],"round":17,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  17                  0      0.00          1646         805               5.73
+F4_DIRECT_ROUND_18 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=18 p1_s=0.29 p2_n=207 p2_s=0.96 p3_n=479 p3_s=4.44 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=18 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=18 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=18 gpu_ok=0 wide_ok=0 cpu_ok=859 gpu_pops=0 cpu_pops=191086806 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=5.71
+F4_V37_ROUND iter=18 active=7635 routed=859 skip=6776 gpu_ok=0 cpu_ok=859 par=857 ser=2 retries=13 same_ok=19 base_h=207 rel_h=479 fb=0 unrout=0 over=597 excess=597 pops=191086806 gpu_pops=0 waves=0 corridor_s=0.02 gpu_s=0.00 cpp_s=5.71
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":805,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":597,"cpu_pops":191086806,"resident_started":false,"attempts":859,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":597,"observed_cpu_tail_pops":[0,0,0],"round":18,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  18                  0      0.00           859         597               5.86
+F4_DIRECT_ROUND_19 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=19 p1_s=0.22 p2_n=114 p2_s=0.70 p3_n=311 p3_s=3.95 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=19 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=19 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=19 gpu_ok=0 wide_ok=0 cpu_ok=671 gpu_pops=0 cpu_pops=156553228 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=4.88
+F4_V37_ROUND iter=19 active=1963 routed=671 skip=1292 gpu_ok=0 cpu_ok=671 par=670 ser=1 retries=10 same_ok=24 base_h=114 rel_h=311 fb=0 unrout=0 over=563 excess=563 pops=156553228 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=4.88
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":597,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":563,"cpu_pops":156553228,"resident_started":false,"attempts":671,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":563,"observed_cpu_tail_pops":[0,0,0],"round":19,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  19                  0      0.00           671         563               5.01
+F4_DIRECT_ROUND_20 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=20 p1_s=0.16 p2_n=96 p2_s=0.51 p3_n=240 p3_s=3.22 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=20 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=20 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=20 gpu_ok=0 wide_ok=0 cpu_ok=522 gpu_pops=0 cpu_pops=125044647 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=3.90
+F4_V37_ROUND iter=20 active=4211 routed=522 skip=3689 gpu_ok=0 cpu_ok=522 par=521 ser=1 retries=11 same_ok=4 base_h=96 rel_h=240 fb=0 unrout=0 over=555 excess=555 pops=125044647 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=3.90
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":563,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":555,"cpu_pops":125044647,"resident_started":false,"attempts":522,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":555,"observed_cpu_tail_pops":[0,0,0],"round":20,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  20                  0      0.00           522         555               4.04
+F4_DIRECT_ROUND_21 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=21 p1_s=0.15 p2_n=104 p2_s=0.46 p3_n=207 p3_s=8.26 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=21 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=21 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=21 gpu_ok=0 wide_ok=0 cpu_ok=616 gpu_pops=0 cpu_pops=127263800 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=8.88
+F4_V37_ROUND iter=21 active=9430 routed=616 skip=8814 gpu_ok=0 cpu_ok=616 par=615 ser=1 retries=9 same_ok=110 base_h=104 rel_h=207 fb=0 unrout=0 over=525 excess=525 pops=127263800 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=8.88
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":555,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":525,"cpu_pops":127263800,"resident_started":false,"attempts":616,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":525,"observed_cpu_tail_pops":[0,0,0],"round":21,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  21                  0      0.00           616         525               9.02
+F4_DIRECT_ROUND_22 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=22 p1_s=0.13 p2_n=78 p2_s=0.34 p3_n=188 p3_s=3.10 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=22 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=22 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=22 gpu_ok=0 wide_ok=0 cpu_ok=471 gpu_pops=0 cpu_pops=105001426 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=3.58
+F4_V37_ROUND iter=22 active=2559 routed=471 skip=2088 gpu_ok=0 cpu_ok=471 par=470 ser=1 retries=9 same_ok=1 base_h=78 rel_h=188 fb=0 unrout=0 over=501 excess=501 pops=105001426 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=3.58
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":525,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":501,"cpu_pops":105001426,"resident_started":false,"attempts":471,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":501,"observed_cpu_tail_pops":[0,0,0],"round":22,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  22                  0      0.00           471         501               3.71
+F4_DIRECT_ROUND_23 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=23 p1_s=0.14 p2_n=78 p2_s=0.43 p3_n=174 p3_s=3.10 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=23 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=23 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=23 gpu_ok=0 wide_ok=0 cpu_ok=494 gpu_pops=0 cpu_pops=103460594 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=3.68
+F4_V37_ROUND iter=23 active=3478 routed=494 skip=2984 gpu_ok=0 cpu_ok=494 par=493 ser=1 retries=11 same_ok=2 base_h=78 rel_h=174 fb=0 unrout=0 over=503 excess=503 pops=103460594 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=3.68
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":501,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":503,"cpu_pops":103460594,"resident_started":false,"attempts":494,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":503,"observed_cpu_tail_pops":[0,0,0],"round":23,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  23                  0      0.00           494         503               3.82
+F4_DIRECT_ROUND_24 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=24 p1_s=0.13 p2_n=80 p2_s=0.37 p3_n=163 p3_s=2.87 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=24 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=24 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=24 gpu_ok=0 wide_ok=0 cpu_ok=487 gpu_pops=0 cpu_pops=98403115 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=3.38
+F4_V37_ROUND iter=24 active=2260 routed=487 skip=1773 gpu_ok=0 cpu_ok=487 par=486 ser=1 retries=13 same_ok=1 base_h=80 rel_h=163 fb=0 unrout=0 over=468 excess=468 pops=98403115 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=3.38
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":503,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":468,"cpu_pops":98403115,"resident_started":false,"attempts":487,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":468,"observed_cpu_tail_pops":[0,0,0],"round":24,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  24                  0      0.00           487         468               3.52
+F4_DIRECT_ROUND_25 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=25 p1_s=0.11 p2_n=65 p2_s=0.31 p3_n=153 p3_s=3.05 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=25 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=25 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=25 gpu_ok=0 wide_ok=0 cpu_ok=442 gpu_pops=0 cpu_pops=102045313 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=3.48
+F4_V37_ROUND iter=25 active=5165 routed=442 skip=4723 gpu_ok=0 cpu_ok=442 par=441 ser=1 retries=13 same_ok=0 base_h=65 rel_h=153 fb=0 unrout=0 over=458 excess=458 pops=102045313 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=3.48
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":468,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":458,"cpu_pops":102045313,"resident_started":false,"attempts":442,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":458,"observed_cpu_tail_pops":[0,0,0],"round":25,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  25                  0      0.00           442         458               3.60
+F4_DIRECT_ROUND_26 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=26 p1_s=0.13 p2_n=66 p2_s=0.30 p3_n=157 p3_s=2.84 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=26 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=26 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=26 gpu_ok=0 wide_ok=0 cpu_ok=424 gpu_pops=0 cpu_pops=92411415 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=3.28
+F4_V37_ROUND iter=26 active=2604 routed=424 skip=2180 gpu_ok=0 cpu_ok=424 par=423 ser=1 retries=8 same_ok=0 base_h=66 rel_h=157 fb=0 unrout=0 over=436 excess=436 pops=92411415 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=3.28
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":458,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":436,"cpu_pops":92411415,"resident_started":false,"attempts":424,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":436,"observed_cpu_tail_pops":[0,0,0],"round":26,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  26                  0      0.00           424         436               3.41
+F4_DIRECT_ROUND_27 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=27 p1_s=0.15 p2_n=57 p2_s=0.39 p3_n=132 p3_s=4.76 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=27 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=27 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=27 gpu_ok=0 wide_ok=0 cpu_ok=475 gpu_pops=0 cpu_pops=86417112 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=5.31
+F4_V37_ROUND iter=27 active=3965 routed=475 skip=3490 gpu_ok=0 cpu_ok=475 par=473 ser=2 retries=7 same_ok=15 base_h=57 rel_h=132 fb=0 unrout=0 over=436 excess=436 pops=86417112 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=5.31
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":436,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":436,"cpu_pops":86417112,"resident_started":false,"attempts":475,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":436,"observed_cpu_tail_pops":[0,0,0],"round":27,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  27                  0      0.00           475         436               5.44
+F4_DIRECT_ROUND_28 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=28 p1_s=0.14 p2_n=62 p2_s=0.28 p3_n=128 p3_s=2.79 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=28 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=28 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=28 gpu_ok=0 wide_ok=0 cpu_ok=411 gpu_pops=0 cpu_pops=79562431 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=3.21
+F4_V37_ROUND iter=28 active=4623 routed=411 skip=4212 gpu_ok=0 cpu_ok=411 par=409 ser=2 retries=10 same_ok=9 base_h=62 rel_h=128 fb=0 unrout=0 over=416 excess=416 pops=79562431 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=3.21
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":436,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":416,"cpu_pops":79562431,"resident_started":false,"attempts":411,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":416,"observed_cpu_tail_pops":[0,0,0],"round":28,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  28                  0      0.00           411         416               3.35
+F4_DIRECT_ROUND_29 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=29 p1_s=0.11 p2_n=50 p2_s=0.28 p3_n=128 p3_s=2.00 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=29 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=29 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=29 gpu_ok=0 wide_ok=0 cpu_ok=394 gpu_pops=0 cpu_pops=71949920 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=2.40
+F4_V37_ROUND iter=29 active=5394 routed=394 skip=5000 gpu_ok=0 cpu_ok=394 par=393 ser=1 retries=4 same_ok=4 base_h=50 rel_h=128 fb=0 unrout=0 over=436 excess=436 pops=71949920 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=2.40
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":416,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":436,"cpu_pops":71949920,"resident_started":false,"attempts":394,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":436,"observed_cpu_tail_pops":[0,0,0],"round":29,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  29                  0      0.00           394         436               2.54
+F4_DIRECT_ROUND_30 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=30 p1_s=0.11 p2_n=54 p2_s=0.31 p3_n=116 p3_s=7.05 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=30 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=30 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=30 gpu_ok=0 wide_ok=0 cpu_ok=413 gpu_pops=0 cpu_pops=70154611 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=7.48
+F4_V37_ROUND iter=30 active=2464 routed=413 skip=2051 gpu_ok=0 cpu_ok=413 par=412 ser=1 retries=9 same_ok=13 base_h=54 rel_h=116 fb=0 unrout=0 over=359 excess=359 pops=70154611 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=7.48
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":436,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":359,"cpu_pops":70154611,"resident_started":false,"attempts":413,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":359,"observed_cpu_tail_pops":[0,0,0],"round":30,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  30                  0      0.00           413         359               7.62
+F4_DIRECT_ROUND_31 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=31 p1_s=0.12 p2_n=47 p2_s=0.29 p3_n=91 p3_s=5.05 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=31 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=31 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=31 gpu_ok=0 wide_ok=0 cpu_ok=360 gpu_pops=0 cpu_pops=59578970 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=5.48
+F4_V37_ROUND iter=31 active=16187 routed=360 skip=15827 gpu_ok=0 cpu_ok=360 par=359 ser=1 retries=6 same_ok=10 base_h=47 rel_h=91 fb=0 unrout=0 over=352 excess=352 pops=59578970 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=5.48
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":359,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":352,"cpu_pops":59578970,"resident_started":false,"attempts":360,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":352,"observed_cpu_tail_pops":[0,0,0],"round":31,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  31                  0      0.00           360         352               5.61
+F4_DIRECT_ROUND_32 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=32 p1_s=0.09 p2_n=25 p2_s=0.24 p3_n=89 p3_s=1.60 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=32 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=32 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=32 gpu_ok=0 wide_ok=0 cpu_ok=338 gpu_pops=0 cpu_pops=49147258 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=1.95
+F4_V37_ROUND iter=32 active=1102 routed=338 skip=764 gpu_ok=0 cpu_ok=338 par=338 ser=0 retries=10 same_ok=0 base_h=25 rel_h=89 fb=0 unrout=0 over=330 excess=330 pops=49147258 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=1.95
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":352,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":330,"cpu_pops":49147258,"resident_started":false,"attempts":338,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":330,"observed_cpu_tail_pops":[0,0,0],"round":32,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  32                  0      0.00           338         330               2.06
+F4_DIRECT_ROUND_33 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=33 p1_s=0.10 p2_n=36 p2_s=0.24 p3_n=74 p3_s=1.59 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=33 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=33 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=33 gpu_ok=0 wide_ok=0 cpu_ok=302 gpu_pops=0 cpu_pops=47400851 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=1.94
+F4_V37_ROUND iter=33 active=6550 routed=302 skip=6248 gpu_ok=0 cpu_ok=302 par=301 ser=1 retries=9 same_ok=0 base_h=36 rel_h=74 fb=0 unrout=0 over=315 excess=315 pops=47400851 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=1.94
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":330,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":315,"cpu_pops":47400851,"resident_started":false,"attempts":302,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":315,"observed_cpu_tail_pops":[0,0,0],"round":33,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  33                  0      0.00           302         315               2.08
+F4_DIRECT_ROUND_34 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=34 p1_s=0.09 p2_n=40 p2_s=0.26 p3_n=72 p3_s=2.00 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=34 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=34 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=34 gpu_ok=0 wide_ok=0 cpu_ok=331 gpu_pops=0 cpu_pops=48609567 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=2.35
+F4_V37_ROUND iter=34 active=1916 routed=331 skip=1585 gpu_ok=0 cpu_ok=331 par=330 ser=1 retries=10 same_ok=38 base_h=40 rel_h=72 fb=0 unrout=0 over=308 excess=308 pops=48609567 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=2.35
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":315,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":308,"cpu_pops":48609567,"resident_started":false,"attempts":331,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":308,"observed_cpu_tail_pops":[0,0,0],"round":34,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  34                  0      0.00           331         308               2.48
+F4_DIRECT_ROUND_35 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=35 p1_s=0.08 p2_n=40 p2_s=0.22 p3_n=62 p3_s=2.48 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=35 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=35 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=35 gpu_ok=0 wide_ok=0 cpu_ok=317 gpu_pops=0 cpu_pops=36101095 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=2.79
+F4_V37_ROUND iter=35 active=2591 routed=317 skip=2274 gpu_ok=0 cpu_ok=317 par=316 ser=1 retries=4 same_ok=34 base_h=40 rel_h=62 fb=0 unrout=0 over=284 excess=284 pops=36101095 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=2.79
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":308,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":284,"cpu_pops":36101095,"resident_started":false,"attempts":317,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":284,"observed_cpu_tail_pops":[0,0,0],"round":35,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  35                  0      0.00           317         284               2.91
+F4_DIRECT_ROUND_36 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=36 p1_s=0.08 p2_n=25 p2_s=0.22 p3_n=47 p3_s=1.78 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=36 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=36 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=36 gpu_ok=0 wide_ok=0 cpu_ok=302 gpu_pops=0 cpu_pops=31730490 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=2.08
+F4_V37_ROUND iter=36 active=1846 routed=302 skip=1544 gpu_ok=0 cpu_ok=302 par=301 ser=1 retries=6 same_ok=29 base_h=25 rel_h=47 fb=0 unrout=0 over=272 excess=272 pops=31730490 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=2.08
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":284,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":272,"cpu_pops":31730490,"resident_started":false,"attempts":302,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":272,"observed_cpu_tail_pops":[0,0,0],"round":36,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  36                  0      0.00           302         272               2.22
+F4_DIRECT_ROUND_37 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=37 p1_s=0.10 p2_n=30 p2_s=0.22 p3_n=50 p3_s=1.03 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=37 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=37 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=37 gpu_ok=0 wide_ok=0 cpu_ok=247 gpu_pops=0 cpu_pops=23972590 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=1.37
+F4_V37_ROUND iter=37 active=4604 routed=247 skip=4357 gpu_ok=0 cpu_ok=247 par=246 ser=1 retries=5 same_ok=3 base_h=30 rel_h=50 fb=0 unrout=0 over=254 excess=254 pops=23972590 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=1.37
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":272,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":254,"cpu_pops":23972590,"resident_started":false,"attempts":247,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":254,"observed_cpu_tail_pops":[0,0,0],"round":37,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  37                  0      0.00           247         254               1.50
+F4_DIRECT_ROUND_38 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=38 p1_s=0.09 p2_n=27 p2_s=0.26 p3_n=42 p3_s=1.21 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=38 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=38 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=38 gpu_ok=0 wide_ok=0 cpu_ok=255 gpu_pops=0 cpu_pops=20597784 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=1.58
+F4_V37_ROUND iter=38 active=1880 routed=255 skip=1625 gpu_ok=0 cpu_ok=255 par=254 ser=1 retries=3 same_ok=14 base_h=27 rel_h=42 fb=0 unrout=0 over=241 excess=241 pops=20597784 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=1.58
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":254,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":241,"cpu_pops":20597784,"resident_started":false,"attempts":255,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":241,"observed_cpu_tail_pops":[0,0,0],"round":38,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  38                  0      0.00           255         241               1.72
+F4_DIRECT_ROUND_39 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=39 p1_s=0.09 p2_n=14 p2_s=0.25 p3_n=24 p3_s=0.94 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=39 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=39 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=39 gpu_ok=0 wide_ok=0 cpu_ok=215 gpu_pops=0 cpu_pops=12346342 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=1.29
+F4_V37_ROUND iter=39 active=768 routed=215 skip=553 gpu_ok=0 cpu_ok=215 par=214 ser=1 retries=4 same_ok=9 base_h=14 rel_h=24 fb=0 unrout=0 over=224 excess=224 pops=12346342 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=1.29
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":241,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":224,"cpu_pops":12346342,"resident_started":false,"attempts":215,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":224,"observed_cpu_tail_pops":[0,0,0],"round":39,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  39                  0      0.00           215         224               1.41
+F4_DIRECT_ROUND_40 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=40 p1_s=0.09 p2_n=36 p2_s=0.24 p3_n=23 p3_s=0.94 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=40 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=40 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=40 gpu_ok=0 wide_ok=0 cpu_ok=323 gpu_pops=0 cpu_pops=12055090 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=1.28
+F4_V37_ROUND iter=40 active=7916 routed=323 skip=7593 gpu_ok=0 cpu_ok=323 par=322 ser=1 retries=0 same_ok=103 base_h=36 rel_h=23 fb=0 unrout=0 over=216 excess=216 pops=12055090 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=1.28
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":224,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":216,"cpu_pops":12055090,"resident_started":false,"attempts":323,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":216,"observed_cpu_tail_pops":[0,0,0],"round":40,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  40                  0      0.00           323         216               1.42
+F4_DIRECT_ROUND_41 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=41 p1_s=0.08 p2_n=22 p2_s=0.19 p3_n=23 p3_s=0.88 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=41 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=41 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=41 gpu_ok=0 wide_ok=0 cpu_ok=216 gpu_pops=0 cpu_pops=12353406 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=1.15
+F4_V37_ROUND iter=41 active=2082 routed=216 skip=1866 gpu_ok=0 cpu_ok=216 par=215 ser=1 retries=0 same_ok=20 base_h=22 rel_h=23 fb=0 unrout=0 over=182 excess=182 pops=12353406 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=1.15
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":216,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":182,"cpu_pops":12353406,"resident_started":false,"attempts":216,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":182,"observed_cpu_tail_pops":[0,0,0],"round":41,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  41                  0      0.00           216         182               1.29
+F4_DIRECT_ROUND_42 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=42 p1_s=0.09 p2_n=14 p2_s=0.18 p3_n=20 p3_s=1.66 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=42 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=42 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=42 gpu_ok=0 wide_ok=0 cpu_ok=205 gpu_pops=0 cpu_pops=16250494 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=1.94
+F4_V37_ROUND iter=42 active=4267 routed=205 skip=4062 gpu_ok=0 cpu_ok=205 par=204 ser=1 retries=7 same_ok=18 base_h=14 rel_h=20 fb=0 unrout=0 over=183 excess=183 pops=16250494 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=1.94
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":182,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":183,"cpu_pops":16250494,"resident_started":false,"attempts":205,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":183,"observed_cpu_tail_pops":[0,0,0],"round":42,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  42                  0      0.00           205         183               2.08
+F4_DIRECT_ROUND_43 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=43 p1_s=0.08 p2_n=14 p2_s=0.16 p3_n=18 p3_s=0.93 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=43 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=43 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=43 gpu_ok=0 wide_ok=0 cpu_ok=200 gpu_pops=0 cpu_pops=8709852 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=1.17
+F4_V37_ROUND iter=43 active=779 routed=200 skip=579 gpu_ok=0 cpu_ok=200 par=199 ser=1 retries=1 same_ok=23 base_h=14 rel_h=18 fb=0 unrout=0 over=161 excess=161 pops=8709852 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=1.17
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":183,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":161,"cpu_pops":8709852,"resident_started":false,"attempts":200,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":161,"observed_cpu_tail_pops":[0,0,0],"round":43,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  43                  0      0.00           200         161               1.32
+F4_DIRECT_ROUND_44 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=44 p1_s=0.08 p2_n=24 p2_s=0.22 p3_n=13 p3_s=0.53 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=44 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=44 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=44 gpu_ok=0 wide_ok=0 cpu_ok=182 gpu_pops=0 cpu_pops=5429181 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.85
+F4_V37_ROUND iter=44 active=6748 routed=182 skip=6566 gpu_ok=0 cpu_ok=182 par=181 ser=1 retries=1 same_ok=15 base_h=24 rel_h=13 fb=0 unrout=0 over=148 excess=148 pops=5429181 gpu_pops=0 waves=0 corridor_s=0.01 gpu_s=0.00 cpp_s=0.85
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":161,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":148,"cpu_pops":5429181,"resident_started":false,"attempts":182,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":148,"observed_cpu_tail_pops":[0,0,0],"round":44,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  44                  0      0.00           182         148               0.99
+F4_DIRECT_ROUND_45 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=45 p1_s=0.03 p2_n=7 p2_s=0.00 p3_n=12 p3_s=0.47 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=45 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=45 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=45 gpu_ok=0 wide_ok=0 cpu_ok=180 gpu_pops=0 cpu_pops=3589130 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.51
+F4_V37_ROUND iter=45 active=717 routed=180 skip=537 gpu_ok=0 cpu_ok=180 par=178 ser=2 retries=0 same_ok=12 base_h=7 rel_h=12 fb=0 unrout=0 over=133 excess=133 pops=3589130 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.51
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":148,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":133,"cpu_pops":3589130,"resident_started":false,"attempts":180,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":133,"observed_cpu_tail_pops":[0,0,0],"round":45,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  45                  0      0.00           180         133               0.63
+F4_DIRECT_ROUND_46 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=46 p1_s=0.07 p2_n=13 p2_s=0.18 p3_n=7 p3_s=0.38 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=46 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=46 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=46 gpu_ok=0 wide_ok=0 cpu_ok=158 gpu_pops=0 cpu_pops=2708920 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.64
+F4_V37_ROUND iter=46 active=760 routed=158 skip=602 gpu_ok=0 cpu_ok=158 par=157 ser=1 retries=1 same_ok=14 base_h=13 rel_h=7 fb=0 unrout=0 over=121 excess=121 pops=2708920 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.64
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":133,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":121,"cpu_pops":2708920,"resident_started":false,"attempts":158,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":121,"observed_cpu_tail_pops":[0,0,0],"round":46,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  46                  0      0.00           158         121               0.76
+F4_DIRECT_ROUND_47 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=47 p1_s=0.07 p2_n=11 p2_s=0.12 p3_n=6 p3_s=0.84 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=47 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=47 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=47 gpu_ok=0 wide_ok=0 cpu_ok=148 gpu_pops=0 cpu_pops=2947832 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=1.03
+F4_V37_ROUND iter=47 active=580 routed=148 skip=432 gpu_ok=0 cpu_ok=148 par=146 ser=2 retries=1 same_ok=28 base_h=11 rel_h=6 fb=0 unrout=0 over=115 excess=115 pops=2947832 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=1.03
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":121,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":115,"cpu_pops":2947832,"resident_started":false,"attempts":148,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":115,"observed_cpu_tail_pops":[0,0,0],"round":47,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  47                  0      0.00           148         115               1.16
+F4_DIRECT_ROUND_48 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=48 p1_s=0.06 p2_n=4 p2_s=0.11 p3_n=4 p3_s=0.84 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=48 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=48 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=48 gpu_ok=0 wide_ok=0 cpu_ok=131 gpu_pops=0 cpu_pops=2758604 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=1.01
+F4_V37_ROUND iter=48 active=713 routed=131 skip=582 gpu_ok=0 cpu_ok=131 par=129 ser=2 retries=2 same_ok=19 base_h=4 rel_h=4 fb=0 unrout=0 over=81 excess=81 pops=2758604 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=1.01
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":115,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":81,"cpu_pops":2758604,"resident_started":false,"attempts":131,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":81,"observed_cpu_tail_pops":[0,0,0],"round":48,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  48                  0      0.00           131          81               1.14
+F4_DIRECT_ROUND_49 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=49 p1_s=0.06 p2_n=7 p2_s=0.10 p3_n=6 p3_s=0.41 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=49 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=49 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=49 gpu_ok=0 wide_ok=0 cpu_ok=102 gpu_pops=0 cpu_pops=1886388 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.58
+F4_V37_ROUND iter=49 active=605 routed=102 skip=503 gpu_ok=0 cpu_ok=102 par=101 ser=1 retries=1 same_ok=10 base_h=7 rel_h=6 fb=0 unrout=0 over=76 excess=76 pops=1886388 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.58
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":81,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":76,"cpu_pops":1886388,"resident_started":false,"attempts":102,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":76,"observed_cpu_tail_pops":[0,0,0],"round":49,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  49                  0      0.00           102          76               0.71
+F4_DIRECT_ROUND_50 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=50 p1_s=0.07 p2_n=8 p2_s=0.16 p3_n=3 p3_s=0.39 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=50 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=50 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=50 gpu_ok=0 wide_ok=0 cpu_ok=89 gpu_pops=0 cpu_pops=2311713 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.63
+F4_V37_ROUND iter=50 active=492 routed=89 skip=403 gpu_ok=0 cpu_ok=89 par=88 ser=1 retries=2 same_ok=9 base_h=8 rel_h=3 fb=0 unrout=0 over=53 excess=53 pops=2311713 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.63
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":76,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":53,"cpu_pops":2311713,"resident_started":false,"attempts":89,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":53,"observed_cpu_tail_pops":[0,0,0],"round":50,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  50                  0      0.00            89          53               0.75
+F4_DIRECT_ROUND_51 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=51 p1_s=0.06 p2_n=11 p2_s=0.17 p3_n=7 p3_s=0.41 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=51 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=51 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=51 gpu_ok=0 wide_ok=0 cpu_ok=78 gpu_pops=0 cpu_pops=3338715 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.65
+F4_V37_ROUND iter=51 active=503 routed=78 skip=425 gpu_ok=0 cpu_ok=78 par=78 ser=0 retries=2 same_ok=6 base_h=11 rel_h=7 fb=0 unrout=0 over=53 excess=53 pops=3338715 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.65
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":53,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":53,"cpu_pops":3338715,"resident_started":false,"attempts":78,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":53,"observed_cpu_tail_pops":[0,0,0],"round":51,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  51                  0      0.00            78          53               0.78
+F4_DIRECT_ROUND_52 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=52 p1_s=0.06 p2_n=10 p2_s=0.17 p3_n=6 p3_s=0.38 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=52 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=52 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=52 gpu_ok=0 wide_ok=0 cpu_ok=65 gpu_pops=0 cpu_pops=2509294 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.62
+F4_V37_ROUND iter=52 active=99 routed=65 skip=34 gpu_ok=0 cpu_ok=65 par=64 ser=1 retries=1 same_ok=6 base_h=10 rel_h=6 fb=0 unrout=0 over=42 excess=42 pops=2509294 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.62
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":53,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":42,"cpu_pops":2509294,"resident_started":false,"attempts":65,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":42,"observed_cpu_tail_pops":[0,0,0],"round":52,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  52                  0      0.00            65          42               0.76
+F4_DIRECT_ROUND_53 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=53 p1_s=0.02 p2_n=2 p2_s=0.00 p3_n=4 p3_s=0.38 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=53 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=53 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=53 gpu_ok=0 wide_ok=0 cpu_ok=88 gpu_pops=0 cpu_pops=1617910 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.42
+F4_V37_ROUND iter=53 active=848 routed=88 skip=760 gpu_ok=0 cpu_ok=88 par=86 ser=2 retries=1 same_ok=29 base_h=2 rel_h=4 fb=0 unrout=0 over=22 excess=22 pops=1617910 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.42
+F4_PPT11_ROUND {"next":"DRAIN","previous_excess":42,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":22,"cpu_pops":1617910,"resident_started":false,"attempts":88,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":22,"observed_cpu_tail_pops":[0,0,0],"round":53,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  53                  0      0.00            88          22               0.59
+F4_DIRECT_ROUND_54 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=54 p1_s=0.06 p2_n=2 p2_s=0.00 p3_n=2 p3_s=0.00 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=54 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=54 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=54 gpu_ok=0 wide_ok=0 cpu_ok=60 gpu_pops=0 cpu_pops=124296 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.07
+F4_V37_ROUND iter=54 active=102 routed=60 skip=42 gpu_ok=0 cpu_ok=60 par=60 ser=0 retries=4 same_ok=24 base_h=2 rel_h=2 fb=0 unrout=0 over=16 excess=16 pops=124296 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.07
+F4_PPT11_ROUND {"next":"DRAIN","previous_excess":22,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"DRAIN","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":16,"cpu_pops":124296,"resident_started":false,"attempts":60,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":16,"observed_cpu_tail_pops":[0,0,0],"round":54,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  54                  0      0.00            60          16               0.19
+F4_DIRECT_ROUND_55 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=55 p1_s=0.00 p2_n=0 p2_s=0.00 p3_n=45 p3_s=0.21 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=55 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=55 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=55 gpu_ok=0 wide_ok=0 cpu_ok=45 gpu_pops=0 cpu_pops=148525 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.22
+F4_V37_ROUND iter=55 active=45 routed=45 skip=0 gpu_ok=0 cpu_ok=45 par=0 ser=45 retries=0 same_ok=0 base_h=0 rel_h=0 fb=0 unrout=0 over=2 excess=2 pops=148525 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.22
+F4_V68_MICRO_STUCK iter=55 over=2 streak=1 mult=2.0
+F4_PPT11_ROUND {"next":"DRAIN","previous_excess":16,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"DRAIN","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":2,"cpu_pops":148525,"resident_started":false,"attempts":45,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":2,"observed_cpu_tail_pops":[0,0,0],"round":55,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  55                  0      0.00            45           2               0.33
+F4_DIRECT_ROUND_56 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=56 p1_s=0.00 p2_n=0 p2_s=0.00 p3_n=52 p3_s=0.11 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=56 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=56 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=56 gpu_ok=0 wide_ok=0 cpu_ok=52 gpu_pops=0 cpu_pops=40758 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.11
+F4_V37_ROUND iter=56 active=20 routed=52 skip=0 gpu_ok=0 cpu_ok=52 par=0 ser=52 retries=0 same_ok=0 base_h=0 rel_h=0 fb=0 unrout=0 over=1 excess=1 pops=40758 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.11
+F4_V68_MICRO_STUCK iter=56 over=1 streak=2 mult=3.0
+F4_PPT11_ROUND {"next":"DRAIN","previous_excess":2,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"DRAIN","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":1,"cpu_pops":40758,"resident_started":false,"attempts":52,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":1,"observed_cpu_tail_pops":[0,0,0],"round":56,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  56                  0      0.00            52           1               0.23
+F4_DIRECT_ROUND_57 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=57 p1_s=0.00 p2_n=0 p2_s=0.00 p3_n=35 p3_s=0.05 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=57 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=57 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=57 gpu_ok=0 wide_ok=0 cpu_ok=35 gpu_pops=0 cpu_pops=15835 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.06
+F4_V37_ROUND iter=57 active=3 routed=35 skip=0 gpu_ok=0 cpu_ok=35 par=0 ser=35 retries=0 same_ok=0 base_h=0 rel_h=0 fb=0 unrout=0 over=0 excess=0 pops=15835 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.06
+F4_PPT11_ROUND {"next":"CONVERGED","previous_excess":1,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"DRAIN","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":0,"cpu_pops":15835,"resident_started":false,"attempts":35,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":0,"observed_cpu_tail_pops":[0,0,0],"round":57,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  57                  0      0.00            35           0               0.08
+------------------------------------------------------------------------------
+V37_MATERIALIZE_VERIFY_OK checked=20
+FIDES_V37_GPU shutdown=true
+FIDES_NATIVE_CPU v37 materialized=4909155 overused=0 seq_fix=0 time_s=14.98 (export=0.78 cache=5.31 bind=3.88 users=5.01)
+F4_DIRECT_CUDA_DEVICE GPU-0f245cf2-a782-7ace-40a7-45f076f5d285
+F4_GPU_DIRECT_COMMITTED 43564
+F4_V37_ASSIGN_NODES conns=4909155 time_s=3.00
+F4_V37_FIX_ROUTES fixed=115617 parallel=true time_s=6.95
+F4_V66_POST lut=0.00 assign=3.00 fix=6.95 srcPin=1.81
+F4_DIRECT_FINAL offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+FIDES_LANE_BATCH_WITNESS driver=serial batches=0 attempts=0 maxBatch=0 runCalls=0
+FIDES_LANE_CHAIN_WITNESS checked=0 gated_on=1 slot_checked=0 committed=0
+F4_V37_SETPIPS nets=901653 tileTypes=0 trackChanges=false time_s=5.58
+==============================================================================
+==                                Statistics                                ==
+==============================================================================
+Nodes popped:                       27124486998
+Route design:                          638.97s
+├─ Initialization:                      20.25s
+└─ Routing:                            618.72s
+==============================================================================
+FIDES fallbackAttempts=0
+FIDES backtracks calls=0 unexpected=0 silent=0
+FIDES unroutable=0
+F4_V67_UNROUTED count=0 time_s=1.01
+     (Build XDEF Header):            (    3.613s)
+(Write XDEF Cache (3/3)):            (    1.733s)
+(Write XDEF Cache (2/3)):            (    5.439s)
+F4_V37_STATS_WL nets=901653 time_s=9.11
+Total wirelength:                     18964265
+            (Write EDIF):            (   12.158s)
+(Write XDEF Cache (1/3)):            (    2.902s)
+    (Write XDEF Routing):            (   18.821s)
+  (Write XDEF Placement):            (    5.375s)
+ (Write XDEF Finalizing):            (    0.007s)
+            (Write XDEF):            (   19.398s)
+       Write EDIF & XDEF:    19.690s
+               Write XDC:     0.783s
+------------------------------------------------------------------------------
+         [No GC] *Total*:    20.473s
+F4_V66_INPROC_DCP_CHECK pins=5.48s overlap_wall=20.57s write_s=20.57s check_s=3.01s stats_s=9.11s
+F4_BASE_DCP unroutedPins=0 sharedPipNodes=0 pips=31071296
+
+INFO: Wrote routed design
+ /home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/theia50per-ppt-hybrid-v73/THEIA_50per_gpu_full.dcp
+

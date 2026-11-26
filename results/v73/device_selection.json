@@ -1,0 +1,33 @@
+{
+  "uuid": "GPU-0f245cf2-a782-7ace-40a7-45f076f5d285",
+  "index": 0,
+  "memory_used_mib": 0,
+  "memory_free_mib": 32495,
+  "utilization_pct": 0,
+  "numa_node": 0,
+  "cpu_affinity": [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17
+  ],
+  "numa_applied": true,
+  "gpu0_reference": "GPU-0f245cf2-a782-7ace-40a7-45f076f5d285",
+  "host_available_kib": 387182544,
+  "preexisting_compute_apps": 0,
+  "independent_compiled_runtime": true
+}
