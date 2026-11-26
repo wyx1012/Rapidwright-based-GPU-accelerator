@@ -1073,20 +1073,19 @@ public class PartialRouter extends RWRoute {
                         long sharedCount = shared.size();
                         long totalPips = pipsAdder.sum();
                         long chkNs = System.nanoTime() - tChk0;
-                        final RWRoute deferredRouter = fidesLastRouter;
-                        long statsNs = 0L;
-                        if (deferredRouter != null) {
-                            long tS0 = System.nanoTime();
-                            deferredRouter.fidesRunDeferredStats();
-                            statsNs = System.nanoTime() - tS0;
-                        }
-                        return new long[] { unroutedPins, sharedCount, totalPips, chkNs, statsNs };
+                        return new long[] { unroutedPins, sharedCount, totalPips, chkNs, 0L };
                     }, checkPool);
 
                     long tWr0 = System.nanoTime();
                     routed.writeCheckpoint(routedDCPfileName, t);
                     long tWr1 = System.nanoTime();
                     long[] chk = checkFuture.get();
+                    final RWRoute deferredRouter = fidesLastRouter;
+                    if (deferredRouter != null) {
+                        long tS0 = System.nanoTime();
+                        deferredRouter.fidesRunDeferredStats();
+                        chk[4] = System.nanoTime() - tS0;
+                    }
                     long tEnd = System.nanoTime();
                     if (chk[0] != 0L || chk[1] != 0L || chk[2] <= 0L) {
                         throw new IllegalStateException(String.format(

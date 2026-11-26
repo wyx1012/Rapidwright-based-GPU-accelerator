@@ -93,7 +93,7 @@ final class F1Corridor {
     private static Map<Connection, Candidate>[] createCandShards() {
         @SuppressWarnings("unchecked")
         Map<Connection, Candidate>[] arr = new Map[CAND_SHARDS];
-        for (int s = 0; s < CAND_SHARDS; ++s) arr[s] = new IdentityHashMap<>(1 << 14);
+        for (int s = 0; s < CAND_SHARDS; ++s) arr[s] = new IdentityHashMap<>(1 << 17);
         return arr;
     }
 
@@ -811,16 +811,16 @@ final class F1Corridor {
             }
             if (connection.getHpwl() >= 16) {
                 Map<Connection, Candidate> cmap = candMap(connection);
-                if (cmap.containsKey(connection)) {
+                if (!cmap.isEmpty()) {
                     Candidate existing = cmap.get(connection);
                     if (existing != null && existing.matches(connection)) return existing.tight();
-                    return null;
+                    if (cmap.containsKey(connection)) return null;
                 }
                 Candidate planned = plan(connection);
                 out[index] = new ParallelEntry(planned, null);
                 return planned != null ? planned.tight() : null;
             }
-            if (candMap(connection).containsKey(connection)) return null;
+            if (!f4Retired.isEmpty() && candMap(connection).containsKey(connection)) return null;
             int sx = source.getEndTileXCoordinate(), sy = source.getEndTileYCoordinate();
             int tx = sink.getEndTileXCoordinate(), ty = sink.getEndTileYCoordinate();
             if (!fabric.contains(sx, sy) || !fabric.contains(tx, ty)) return null;
@@ -842,12 +842,17 @@ final class F1Corridor {
         if (!base.contains(sx, sy) || !base.contains(tx, ty)
                 || !fabric.contains(sx, sy) || !fabric.contains(tx, ty)) return null;
         Map<Connection, Candidate> cmap = candMap(connection);
-        if (cmap.containsKey(connection)) {
+        if (!cmap.isEmpty()) {
             Candidate existing = cmap.get(connection);
-            if (existing == null || existing.source != source || existing.sink != sink || !existing.base.same(base)) {
+            if (existing != null) {
+                if (existing.source != source || existing.sink != sink || !existing.base.same(base)) {
+                    return null;
+                }
+                return crossSlrCompactX ? compactMap(connection).getOrDefault(connection, existing.tight()) : existing.tight();
+            }
+            if (cmap.containsKey(connection)) {
                 return null;
             }
-            return crossSlrCompactX ? compactMap(connection).getOrDefault(connection, existing.tight()) : existing.tight();
         }
         Box[] compactBox = new Box[1];
         Candidate planned = planCrossParallel(connection, source, sink, base, sx, sy, tx, ty, graph, compactBox);

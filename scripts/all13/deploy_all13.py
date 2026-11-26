@@ -1,7 +1,7 @@
 """Upload run_all13.py to gpu02 and (optionally) start it detached.
 
 Env: FIDES_SSH_JUMP (user@login-node), FIDES_SSH_PORT.
-Usage: deploy_all13.py [--engine v73] [--force] [--timeout SEC] [case ...]   (no case = upload only)
+Usage: deploy_all13.py [--engine v76] [--force] [--timeout SEC] [case ...]   (no case = upload only)
 """
 import argparse
 import base64
@@ -11,7 +11,7 @@ import shlex
 import subprocess
 
 parser = argparse.ArgumentParser(add_help=False)
-parser.add_argument("--engine", default="v73")
+parser.add_argument("--engine", default="v76")
 known, rest = parser.parse_known_args()
 engine = known.engine
 

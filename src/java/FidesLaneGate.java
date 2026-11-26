@@ -912,8 +912,8 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
                 @SuppressWarnings("unchecked")
                 java.util.ArrayList<NetWrapper>[] localNets = new java.util.ArrayList[SHARDS];
                 for (int s = 0; s < SHARDS; ++s) {
-                    localNodes[s] = new java.util.ArrayList<>(2048);
-                    localNets[s] = new java.util.ArrayList<>(2048);
+                    localNodes[s] = new java.util.ArrayList<>(256);
+                    localNets[s] = new java.util.ArrayList<>(256);
                 }
                 for (int i = f; i < t; ++i) {
                     Connection c = all.get(i);

@@ -4007,14 +4007,15 @@ public class RWRoute {
             jobs.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
                 for (int i = f; i < t; ++i) {
                     Connection connection = indirectConnections.get(i);
-                    List<Node> nodes = new ArrayList<>();
+                    List<RouteNode> rnodes = connection.getRnodes();
+                    if (rnodes.isEmpty()) {
+                        connection.setNodes(java.util.Collections.emptyList());
+                        continue;
+                    }
+                    List<Node> nodes = new ArrayList<>(rnodes.size() + 4);
                     connection.setNodes(nodes);
 
                     RouteNode sinkRnode = connection.getSinkRnode();
-                    List<RouteNode> rnodes = connection.getRnodes();
-                    if (rnodes.isEmpty()) {
-                        continue;
-                    }
 
                     if (sinkRnode == rnodes.get(0)) {
                         List<Node> switchBoxToSink = RouterHelper.findPathBetweenNodes(sinkRnode, connection.getSink().getConnectedNode());

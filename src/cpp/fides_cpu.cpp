@@ -56,7 +56,8 @@ enum PreFlags : U16 {
     PF_CLE_OUTPUT   = 1u << 6,
     PF_LAGUNA_WIRE  = 1u << 7,
     PF_LAGUNA_NORTH = 1u << 8,
-    PF_LAGUNA_SOUTH = 1u << 9
+    PF_LAGUNA_SOUTH = 1u << 9,
+    PF_UTURN_DELAY  = 1u << 10
 };
 
 enum SearchStatus {
@@ -193,22 +194,24 @@ struct NetScopeData {
     }
 };
 
-struct alignas(32) NodeGeom {
+struct alignas(16) NodeGeomHot {
     I16 endTileX;
     I16 endTileYRaw;
     I16 tileY;
     U16 length;
-    U16 nodeType;
-    U16 tileType;
     U16 preFlags;
-    U16 typeFlags;
-    I32 tileId;
+    uint8_t typeFlags;
+    uint8_t nodeType;
     float baseCost;
-    float delay;
+};
+static_assert(sizeof(NodeGeomHot) == 16, "NodeGeomHot must be 16 bytes");
+
+struct alignas(8) NodeGeomCold {
+    I32 tileId;
     I16 endSlrRaw;
     I16 endSlrTileY;
 };
-static_assert(sizeof(NodeGeom) == 32, "NodeGeom must be 32 bytes");
+static_assert(sizeof(NodeGeomCold) == 8, "NodeGeomCold must be 8 bytes");
 
 struct DynNode {
     I32 occ;
@@ -240,7 +243,8 @@ struct GraphData {
     U32 m = 0;
     std::vector<U32> offset;
     std::vector<U32> edge;
-    std::vector<NodeGeom> geom;
+    std::vector<NodeGeomHot> geomHot;
+    std::vector<NodeGeomCold> geomCold;
     std::vector<DynNode> dyn;
 
     std::vector<U32> ord;
@@ -518,24 +522,16 @@ thread_local CpuSearchContext S;
 
 inline int fides_absInt(int a) { return (a < 0) ? -a : a; }
 
-inline float fides_minJdk(float x, float y) {
-    if (x != x) return x;
-    U32 yb;
-    std::memcpy(&yb, &y, sizeof(yb));
-    if (x == 0.0f && y == 0.0f && yb == 0x80000000u) return y;
-    return (x <= y) ? x : y;
-}
-
-inline int endY(const NodeGeom& cg, const NodeGeom* pg) {
+inline int endY(const NodeGeomHot& cg, const NodeGeomHot* pg) {
     return ((cg.preFlags & PF_SLL) && pg != nullptr && pg->endTileYRaw == cg.endTileYRaw)
             ? static_cast<int>(cg.tileY)
             : static_cast<int>(cg.endTileYRaw);
 }
 
-inline int slrFast(const NodeGeom& cg, const NodeGeom* pg) {
+inline int slrFast(U32 id, const NodeGeomHot& cg, const NodeGeomHot* pg) {
     return ((cg.preFlags & PF_SLL) && pg != nullptr && pg->endTileYRaw == cg.endTileYRaw)
-            ? static_cast<int>(cg.endSlrTileY)
-            : static_cast<int>(cg.endSlrRaw);
+            ? static_cast<int>(G.geomCold[id].endSlrTileY)
+            : static_cast<int>(G.geomCold[id].endSlrRaw);
 }
 
 inline int getUsage(U32 id, int& sameUses) {
@@ -601,14 +597,14 @@ struct SearchQuery {
     bool useBox, uturn, cross, north, south;
     int sinkBeginX, sinkBeginY, sinkTile, sinkType, sinkCtrl, sinkSlr;
     float xCenter, yCenter, shareWeight, rnodeCostWeight, rnodeWLWeight, estWlWeight;
-    float netSizeF, doubleHpwlF;
+    float invBiasDenom;
     int budget;
     bool earlyTermination;
     I64 nodesPopped;
 };
 
 inline bool isAccessibleSinkCached(
-        U32 child, const NodeGeom& cg, const SearchQuery& q,
+        U32 child, const NodeGeomHot& cg, const SearchQuery& q,
         int& outOcc, int& outSame, bool& hasUsage) {
     if (child == q.sink) return true;
     if (!(cg.preFlags & PF_PINBOUNCE)) return false;
@@ -618,8 +614,8 @@ inline bool isAccessibleSinkCached(
 }
 
 inline int checkAccessAndLookahead(
-        U32 /*parent*/, const NodeGeom& pg,
-        U32 entering, U32 child, const NodeGeom& cg,
+        U32 /*parent*/, const NodeGeomHot& pg,
+        U32 entering, U32 child, const NodeGeomHot& cg,
         int childX, int childY,
         SearchQuery& q, bool& lookahead,
         int& outOcc, int& outSame, bool& hasUsage) {
@@ -636,10 +632,10 @@ inline int checkAccessAndLookahead(
     U32 ct = cg.nodeType;
     U32 pf = pg.typeFlags;
     U32 cf = cg.typeFlags;
-    int childTile = cg.tileId;
 
     if (cf & Local) {
-        if (q.cross && (cf & Leading) && slrFast(cg, &pg) != q.sinkSlr) {
+        int childTile = G.geomCold[child].tileId;
+        if (q.cross && (cf & Leading) && slrFast(child, cg, &pg) != q.sinkSlr) {
             int dir = (cg.preFlags & PF_LAGUNA_NORTH ? 1 : 0) | (cg.preFlags & PF_LAGUNA_SOUTH ? 2 : 0);
             if (((dir & 1) && !q.north) || ((dir & 2) && !q.south)) return 1;
             if (!(cg.preFlags & PF_INT_TILE) || !(cg.preFlags & PF_LAGUNA_WIRE) || childTile == q.sinkTile) {
@@ -676,7 +672,7 @@ inline int checkAccessAndLookahead(
         if (ct == G.ord[NONLOCAL]) {
             if (pf & Local) {
                 if (childLaguna) {
-                    if (!q.cross || slrFast(cg, &pg) == q.sinkSlr) return 1;
+                    if (!q.cross || slrFast(child, cg, &pg) == q.sinkSlr) return 1;
                 } else {
                     if (!(pg.preFlags & PF_PINFEED)
                         || !(cg.preFlags & PF_CLB_TILE)
@@ -685,10 +681,10 @@ inline int checkAccessAndLookahead(
                     }
                 }
             } else if (pg.preFlags & PF_SLL) {
-                if (entering == UINT32_MAX || G.geom[entering].tileId == childTile) return 1;
+                if (entering == UINT32_MAX || G.geomCold[entering].tileId == G.geomCold[child].tileId) return 1;
             }
         } else if (cg.preFlags & (PF_LAGUNA_NORTH | PF_LAGUNA_SOUTH)) {
-            if (q.cross && slrFast(cg, &pg) != q.sinkSlr) {
+            if (q.cross && slrFast(child, cg, &pg) != q.sinkSlr) {
                 int dir = (cg.preFlags & PF_LAGUNA_NORTH ? 1 : 0) | (cg.preFlags & PF_LAGUNA_SOUTH ? 2 : 0);
                 if (((dir & 1) && q.north) || ((dir & 2) && q.south)) {
                     if (!willOveruseCached(child, outOcc, outSame, hasUsage)) lookahead = true;
@@ -697,7 +693,7 @@ inline int checkAccessAndLookahead(
         } else {
             return -1;
         }
-        if (!q.uturn && cg.delay > 10000.0f) return 1;
+        if (!q.uturn && (cg.preFlags & PF_UTURN_DELAY)) return 1;
         if (parentLaguna || childLaguna) lookahead = true;
         return 0;
     }
@@ -716,15 +712,18 @@ inline int checkAccessAndLookahead(
 
 int expandNode(U32 u, float uUpstream, U32 entering, SearchQuery& q, int depth) {
     if (depth >= 256) return STATUS_FALLBACK;
-    const NodeGeom& pg = G.geom[u];
+    const NodeGeomHot& pg = G.geomHot[u];
     U32 first = G.offset[u];
     U32 last = G.offset[u + 1];
     for (U32 e = first; e < last; ++e) {
         if (e + 2u < last) {
-            __builtin_prefetch(&G.geom[G.edge[e + 2u]], 0, 1);
+            __builtin_prefetch(&G.geomHot[G.edge[e + 2u]], 0, 1);
         }
         U32 child = G.edge[e];
-        const NodeGeom& cg = G.geom[child];
+        NodeSlot* cs = S.slotForRead(child);
+        if (cs != nullptr && cs->stamp == S.seq) continue;
+
+        const NodeGeomHot& cg = G.geomHot[child];
         int childX = static_cast<int>(cg.endTileX);
         int childY = endY(cg, &pg);
         if (q.useBox && child != q.sink) {
@@ -732,8 +731,6 @@ int expandNode(U32 u, float uUpstream, U32 entering, SearchQuery& q, int depth) 
                 continue;
             }
         }
-        NodeSlot* cs = S.slotForRead(child);
-        if (cs != nullptr && cs->stamp == S.seq) continue;
 
         bool lookahead = false;
         int sameUses = 0;
@@ -762,21 +759,29 @@ int expandNode(U32 u, float uUpstream, U32 entering, SearchQuery& q, int depth) 
         float distToCenter = std::fabs(static_cast<float>(childX) - q.xCenter)
                            + std::fabs(static_cast<float>(childY) - q.yCenter);
         float bc = cg.baseCost;
-        float bias = bc / q.netSizeF * distToCenter / q.doubleHpwlF;
-        float sharing = (sameUses == 0) ? 1.0f : (1.0f + q.shareWeight * static_cast<float>(sameUses));
+        float bias = bc * distToCenter * q.invBiasDenom;
         float rawNc = bc * G.dyn[child].hist * pccCost;
-        float nc = (sameUses == 0) ? rawNc : (rawNc / sharing);
-        float nodeCost = nc + fides_minJdk(bias, nc * 0.5f);
+        float invSharing;
+        float nc;
+        if (sameUses == 0) {
+            invSharing = 1.0f;
+            nc = rawNc;
+        } else {
+            invSharing = 1.0f / (1.0f + q.shareWeight * static_cast<float>(sameUses));
+            nc = rawNc * invSharing;
+        }
+        float halfNc = nc * 0.5f;
+        float nodeCost = nc + ((bias <= halfNc) ? bias : halfNc);
 
         float newPartial = uUpstream + q.rnodeCostWeight * nodeCost;
         newPartial += (sameUses == 0)
                 ? (q.rnodeWLWeight * static_cast<float>(cg.length))
-                : (q.rnodeWLWeight * static_cast<float>(cg.length) / sharing);
+                : (q.rnodeWLWeight * static_cast<float>(cg.length) * invSharing);
 
         int deltaX = fides_absInt(childX - q.sinkBeginX);
         int deltaY = fides_absInt(childY - q.sinkBeginY);
         if (q.cross) {
-            int childSlr = slrFast(cg, &pg);
+            int childSlr = slrFast(child, cg, &pg);
             int deltaSLR = fides_absInt(q.sinkSlr - childSlr);
             if (deltaSLR != 0) {
                 if (deltaSLR == 1) {
@@ -818,7 +823,7 @@ int expandNode(U32 u, float uUpstream, U32 entering, SearchQuery& q, int depth) 
         int distToSink = deltaX + deltaY;
         float newTotal = (sameUses == 0)
                 ? (newPartial + q.estWlWeight * static_cast<float>(distToSink))
-                : (newPartial + q.estWlWeight * static_cast<float>(distToSink) / sharing);
+                : (newPartial + q.estWlWeight * static_cast<float>(distToSink) * invSharing);
 
         if (cs == nullptr) cs = S.slotForWrite(child);
         cs->stamp = S.seq;
@@ -946,11 +951,10 @@ I32 runProbe(
     q.sinkTile = c.sinkTile;
     q.sinkType = c.sinkType;
     q.sinkCtrl = (c.flags & 64u) != 0 ? 1 : 0;
-    q.sinkSlr = static_cast<int>(G.geom[q.sink].endSlrRaw);
+    q.sinkSlr = static_cast<int>(G.geomCold[q.sink].endSlrRaw);
     q.xCenter = c.xCenter;
     q.yCenter = c.yCenter;
-    q.netSizeF = static_cast<float>(c.netSize);
-    q.doubleHpwlF = static_cast<float>(c.doubleHpwl);
+    q.invBiasDenom = 1.0f / (static_cast<float>(c.netSize) * static_cast<float>(c.doubleHpwl));
     q.shareWeight = shareWeight;
     q.rnodeCostWeight = rnodeCostWeight;
     q.rnodeWLWeight = rnodeWLWeight;
@@ -1520,7 +1524,8 @@ static bool preinitStaticImpl(const std::string& rrgPath, const std::string& lay
     for (U32& v : G.tileFlags) layout >> v;
     if (!layout) return false;
 
-    G.geom.resize(n);
+    G.geomHot.resize(n);
+    G.geomCold.resize(n);
     std::atomic<bool> boundsOk{true};
     parallelForU32(n, 36, [&](U32 lo, U32 hi) {
         bool localOk = true;
@@ -1529,27 +1534,28 @@ static bool preinitStaticImpl(const std::string& rrgPath, const std::string& lay
                     || endTileYRaw[i] < -32768 || endTileYRaw[i] > 32767
                     || tileY[i] < -32768 || tileY[i] > 32767
                     || length[i] < 0 || length[i] > 65535
-                    || nodeType[i] < 0 || static_cast<U32>(nodeType[i]) >= types
-                    || tileType[i] < 0 || static_cast<U32>(tileType[i]) >= tiles) {
+                    || nodeType[i] < 0 || static_cast<U32>(nodeType[i]) >= types || nodeType[i] > 255
+                    || tileType[i] < 0 || static_cast<U32>(tileType[i]) >= tiles
+                    || G.typeFlags[nodeType[i]] > 255u
+                    || baseCost[i] < 0.0f || std::isnan(baseCost[i])) {
                 fprintf(stdout, "FIDES_NATIVE_CPU v29 geom bounds exceeded at i=%u x=%d y=%d ty=%d len=%d nt=%d tt=%d\n",
                         i, endTileX[i], endTileYRaw[i], tileY[i], length[i], nodeType[i], tileType[i]);
                 fflush(stdout);
                 localOk = false;
                 break;
             }
-            NodeGeom& g = G.geom[i];
-            g.endTileX = static_cast<I16>(endTileX[i]);
-            g.endTileYRaw = static_cast<I16>(endTileYRaw[i]);
-            g.tileY = static_cast<I16>(tileY[i]);
-            g.length = static_cast<U16>(length[i]);
-            g.nodeType = static_cast<U16>(nodeType[i]);
-            g.tileType = static_cast<U16>(tileType[i]);
-            g.typeFlags = static_cast<U16>(G.typeFlags[nodeType[i]]);
-            g.tileId = tileId[i];
-            g.baseCost = baseCost[i];
-            g.delay = delay[i];
-            g.endSlrRaw = -1;
-            g.endSlrTileY = -1;
+            NodeGeomHot& gh = G.geomHot[i];
+            NodeGeomCold& gc = G.geomCold[i];
+            gh.endTileX = static_cast<I16>(endTileX[i]);
+            gh.endTileYRaw = static_cast<I16>(endTileYRaw[i]);
+            gh.tileY = static_cast<I16>(tileY[i]);
+            gh.length = static_cast<U16>(length[i]);
+            gh.typeFlags = static_cast<uint8_t>(G.typeFlags[nodeType[i]]);
+            gh.nodeType = static_cast<uint8_t>(nodeType[i]);
+            gh.baseCost = baseCost[i];
+            gc.tileId = tileId[i];
+            gc.endSlrRaw = -1;
+            gc.endSlrTileY = -1;
 
             U16 pf = 0;
             if (static_cast<U32>(nodeType[i]) == G.ord[SLL]) pf |= PF_SLL;
@@ -1559,7 +1565,8 @@ static bool preinitStaticImpl(const std::string& rrgPath, const std::string& lay
             if (static_cast<U32>(intentCode[i]) == G.ord[PINBOUNCE]) pf |= PF_PINBOUNCE;
             if (static_cast<U32>(intentCode[i]) == G.ord[PINFEED]) pf |= PF_PINFEED;
             if (static_cast<U32>(intentCode[i]) == G.ord[CLE_OUTPUT]) pf |= PF_CLE_OUTPUT;
-            g.preFlags = pf;
+            if (delay[i] > 10000.0f) pf |= PF_UTURN_DELAY;
+            gh.preFlags = pf;
         }
         if (!localOk) boundsOk.store(false, std::memory_order_relaxed);
     });
@@ -1671,12 +1678,13 @@ static bool attachDynamicImpl(
     parallelForU32(n, 36, [&](U32 lo, U32 hi) {
         bool localOk = true;
         for (U32 i = lo; i < hi; ++i) {
-            NodeGeom& g = G.geom[i];
-            g.endSlrRaw = slrAtY(g.endTileYRaw);
-            g.endSlrTileY = slrAtY(g.tileY);
+            NodeGeomHot& g = G.geomHot[i];
+            NodeGeomCold& gc = G.geomCold[i];
+            gc.endSlrRaw = slrAtY(g.endTileYRaw);
+            gc.endSlrTileY = slrAtY(g.tileY);
 
             U16 pf = g.preFlags & static_cast<U16>(~(PF_LAGUNA_WIRE | PF_LAGUNA_NORTH | PF_LAGUNA_SOUTH));
-            if (isLagWire(g.tileId)) pf |= PF_LAGUNA_WIRE;
+            if (isLagWire(gc.tileId)) pf |= PF_LAGUNA_WIRE;
             int ld = lagDir(g.nodeType);
             if (ld & 1) pf |= PF_LAGUNA_NORTH;
             if (ld & 2) pf |= PF_LAGUNA_SOUTH;
@@ -1686,26 +1694,25 @@ static bool attachDynamicImpl(
                 if (g.endTileX < 0 || g.endTileX > 1023
                         || g.endTileYRaw < 0 || g.endTileYRaw > 2047
                         || g.tileY < 0 || g.tileY > 2047
-                        || g.tileId < 0 || g.tileId > 4194303
+                        || gc.tileId < 0 || gc.tileId > 4194303
                         || g.length > 1023
                         || g.nodeType > 31
-                        || g.endSlrRaw < -1 || g.endSlrRaw > 6
-                        || g.endSlrTileY < -1 || g.endSlrTileY > 6) {
+                        || gc.endSlrRaw < -1 || gc.endSlrRaw > 6
+                        || gc.endSlrTileY < -1 || gc.endSlrTileY > 6) {
                     localOk = false;
                 } else {
-                    U32 gpf = static_cast<U32>(pf) & 0x3FFu;
-                    if (g.delay > 10000.0f) gpf |= FG_PF_UTURN_DELAY;
+                    U32 gpf = static_cast<U32>(pf) & 0x7FFu;
                     FidesGpuNodeHot h{};
                     h.w0 = (static_cast<U32>(g.endTileX) & 0x3FFu)
                          | ((static_cast<U32>(g.endTileYRaw) & 0x7FFu) << 10)
                          | ((static_cast<U32>(g.tileY) & 0x7FFu) << 21);
-                    h.w1 = (static_cast<U32>(g.tileId) & 0x3FFFFFu)
+                    h.w1 = (static_cast<U32>(gc.tileId) & 0x3FFFFFu)
                          | ((static_cast<U32>(g.length) & 0x3FFu) << 22);
                     h.w2 = (gpf & 0x7FFu)
                          | ((static_cast<U32>(g.typeFlags) & 0x3Fu) << 11)
                          | ((static_cast<U32>(g.nodeType) & 0x1Fu) << 17)
-                         | ((static_cast<U32>(g.endSlrRaw + 1) & 0x7u) << 22)
-                         | ((static_cast<U32>(g.endSlrTileY + 1) & 0x7u) << 25);
+                         | ((static_cast<U32>(gc.endSlrRaw + 1) & 0x7u) << 22)
+                         | ((static_cast<U32>(gc.endSlrTileY + 1) & 0x7u) << 25);
                     h.baseCost = g.baseCost;
                     gpuHot[i] = h;
                 }
@@ -2816,7 +2823,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         q.sinkBeginY = c.sinkBeginY;
         q.sinkTile = c.sinkTile;
         q.sinkType = c.sinkType;
-        q.sinkSlr = static_cast<I32>(G.geom[c.sink].endSlrRaw);
+        q.sinkSlr = static_cast<I32>(G.geomCold[c.sink].endSlrRaw);
         q.xCenter = c.xCenter;
         q.yCenter = c.yCenter;
         q.netSizeF = static_cast<float>(c.netSize);
@@ -3886,7 +3893,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             std::vector<OvCoord> ovCoords;
             ovCoords.reserve(G.overusedList.size());
             for (U32 id : G.overusedList) {
-                ovCoords.push_back(OvCoord{static_cast<I32>(G.geom[id].endTileX), static_cast<I32>(G.geom[id].tileY)});
+                ovCoords.push_back(OvCoord{static_cast<I32>(G.geomHot[id].endTileX), static_cast<I32>(G.geomHot[id].tileY)});
             }
             const U32 totalConns = static_cast<U32>(G.conns.size());
             std::vector<uint8_t> inAct(totalConns, 0u);
@@ -3921,8 +3928,8 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                     I32 bestDist = 1000000;
                     const auto& p = G.connPaths[ci];
                     for (U32 nid : p) {
-                        I32 nx = static_cast<I32>(G.geom[nid].endTileX);
-                        I32 ny = static_cast<I32>(G.geom[nid].tileY);
+                        I32 nx = static_cast<I32>(G.geomHot[nid].endTileX);
+                        I32 ny = static_cast<I32>(G.geomHot[nid].tileY);
                         for (const OvCoord& oc : ovCoords) {
                             if (fides_absInt(nx - oc.x) <= nbrDx && fides_absInt(ny - oc.y) <= nbrDy) {
                                 I32 d = fides_absInt(nx - oc.x) * 2 + fides_absInt(ny - oc.y);
@@ -4145,7 +4152,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                     U32 cIdx = static_cast<U32>(activeConns[aIdx]);
                     U32 nid = G.conns[cIdx].netId;
                     ++netPass3Cnt[nid];
-                    if (G.lastPops[cIdx] >= 12000000LL) ++netUltraCnt[nid];
+                    if (G.lastPops[cIdx] >= 6500000LL) ++netUltraCnt[nid];
                 }
                 std::vector<uint8_t> bypassNet(numNets, 0u);
                 bool anyBypass = false;
@@ -4294,7 +4301,7 @@ JNIEXPORT jint JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     const bool midOrTail = (routeIter >= 6);
     const bool tailPhase = (routeIter >= 14) || (G.overusedList.size() <= 2200);
     U32 numConns = static_cast<U32>(G.conns.size());
-    std::vector<uint8_t> needRoute(numConns, 0);
+    std::vector<jint> nextAct;
     auto promoteWidenFromStreak = [&](U32 idx, uint8_t cc) {
         if (tailPhase) {
             uint8_t next = static_cast<uint8_t>(std::min<int>(4, static_cast<int>(G.connWiden[idx]) + 1));
@@ -4329,12 +4336,14 @@ JNIEXPORT jint JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     if (!G.overusedList.empty()) {
         int chunks = std::max(1, EXEC.numWorkers + 1);
         U32 step = (numConns + chunks - 1) / chunks;
+        std::vector<std::vector<jint>> chunkNext(chunks);
         BoundaryPool::runChunks(chunks, [&](int c) {
             U32 lo = static_cast<U32>(c) * step;
             U32 hi = std::min(numConns, lo + step);
+            auto& out = chunkNext[c];
             for (U32 i = lo; i < hi; ++i) {
                 if (!G.connRouted[i]) {
-                    needRoute[i] = 1;
+                    out.push_back(static_cast<jint>(i));
                     enlargeConnOrigBox(i);
                     G.consecCongested[i] = (G.consecCongested[i] < 250) ? G.consecCongested[i] + 1 : 250;
                     promoteWidenFromStreak(i, G.consecCongested[i]);
@@ -4345,7 +4354,7 @@ JNIEXPORT jint JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 for (U32 id : path) {
                     if (G.dyn[id].occ > cap) {
                         cong = true;
-                        needRoute[i] = 1;
+                        out.push_back(static_cast<jint>(i));
                         enlargeConnOrigBox(i);
                         break;
                     }
@@ -4363,22 +4372,30 @@ JNIEXPORT jint JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 }
             }
         });
+        std::vector<size_t> offsets(static_cast<size_t>(chunks) + 1u, 0u);
+        for (int c = 0; c < chunks; ++c) {
+            offsets[c + 1] = offsets[c] + chunkNext[c].size();
+        }
+        nextAct.resize(offsets[chunks]);
+        if (offsets[chunks] > 0u) {
+            BoundaryPool::runChunks(chunks, [&](int c) {
+                if (!chunkNext[c].empty()) {
+                    std::memcpy(nextAct.data() + offsets[c], chunkNext[c].data(),
+                                chunkNext[c].size() * sizeof(jint));
+                }
+            });
+        }
     } else {
+        nextAct.reserve(1024u);
         for (U32 i = 0; i < numConns; ++i) {
             if (!G.connRouted[i]) {
-                needRoute[i] = 1;
+                nextAct.push_back(static_cast<jint>(i));
                 enlargeConnOrigBox(i);
             } else {
                 G.consecCongested[i] = 0;
                 G.connWiden[i] = 0;
             }
         }
-    }
-
-    std::vector<jint> nextAct;
-    nextAct.reserve(std::min<U32>(numConns, 1 << 20));
-    for (U32 i = 0; i < numConns; ++i) {
-        if (needRoute[i]) nextAct.push_back(static_cast<jint>(i));
     }
 
     jsize capOut = env->GetArrayLength(jOutNextActive);

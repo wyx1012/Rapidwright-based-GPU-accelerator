@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""Run a hybrid GPU/CPU router build (default v73) on every competition case on gpu02.
+"""Run a hybrid GPU/CPU router build (default v76) on every competition case on gpu02.
 
 Since v73, F2Prewarm.java no longer hard-codes THEIA_50per connection counts (if an older engine
 such as v70 is passed via --engine v70, unpin_f2_geometry automatically relaxes that pin).
 Each design's static RRG closure (rrg.bin + rrg.manifest.txt + rrg.idmap.bin) is cached under
 `all13-rrg-cache/<case>` via hardlinks so subsequent engine versions skip the ~500s export step.
 
-Usage: run_all13.py [--engine v73] [--phase prepare|run|both] [--force] [--timeout SEC]
+Usage: run_all13.py [--engine v76] [--phase prepare|run|both] [--force] [--timeout SEC]
                     [--keep-rrg] [--no-rrg-cache] case [case ...]
 """
 from datetime import datetime
@@ -26,7 +26,7 @@ assert socket.gethostname().split(".")[0] == "gpu02", "must run on gpu02"
 M = Path("/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/"
          "f4-ppt-runtime-measurement-v1")
 CASES = Path("/home/yxwang1/FIDES/RapidWright2/cases")
-ENGINE = "v73"
+ENGINE = "v76"
 SRC = M / f"theia50per-ppt-hybrid-{ENGINE}"
 SUMMARY = M / f"{ENGINE}all13-summary"
 RRG_CACHE = M / "all13-rrg-cache"

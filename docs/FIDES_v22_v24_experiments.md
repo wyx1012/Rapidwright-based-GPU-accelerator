@@ -921,13 +921,48 @@
     - **`53` 轮直接清零 `over=0`**（对比 `v70` `74` 轮省 **`-21` 轮**，原 `R54–74` 消耗 `762.90 s` 的 `128` 邻域震荡完全消失：`R48–53` 在 `7.90 s` 内平稳归零）、`Wirelength = 11,661,635`（较 `v70 11,677,328` 缩短 `-15,693`）；
     - `F4_V66_INPROC_DCP_CHECK pins=1.71s overlap_wall=11.87s write_s=11.87s check_s=1.49s stats_s=3.09s`，进程内与冷启 `F4BaselineDcpCheck` (`57.99s`) 双盲复核 **`unroutedPins=0 sharedPipNodes=0 pips=18882479`** 逐字一致。
 
+### 2.54 `theia50per-ppt-hybrid-v74`（**证伪小批 `Pass 3 < 512` 自适应单/双卡退化：`3×V100` 下推进至 `R22`（`R23` 单核工作线程卡死后手动终止并彻底清理），直接对比证实 `35` 核 CPU 在 `p3_n < 512` 显著快于 GPU `Tier-B1 8M`（`4.59 s` vs `8.90 s`）**）
+- **改动文件**：`scratch/v74/` 下 `fides_cpu.cpp`、`v74_patch.py`、`prepare_v74.py`、`deploy_v74.py`、`launch_v74.py`、`record_rounds_v74.py`。
+- **核心改动**：在 `v73` 上尝试：① `pickAndLpt` 按批大小自适应 `activeDevs`（`<200` 或 `<8` 网用 `1` 卡、`<420` 或 `<16` 网用 `2` 卡）、② 将 `minGpuPass3` 降至 `80` / `minGpuPass2` 降至 `128`（`passItems < 384` 不重试 `Wide 16M/32M`）、③ `nativeUpdateHistAndFeedback` 改为 `BoundaryPool` 并行 `chunkNext` 前缀压缩收集 `nextAct`（去掉单线程扫描）。
+- **编译与冒烟**：4 份编译日志均 `0 B`、`V74_SMOKE_PASS` 通过；`cpp_sha256`：`6335ef590aef7b693737de9ab96d16c063efe51026ab685aa0724d2d9c5bb59e`、`cuda_sha256`：`9487689b8bb67486d58d1bf56cbba25b55bd78ab7e1125b7f80aa69950f6ad9a`。
+- **实测与停止归因（`2026-11-26T17:12:32` 启动；因 `GPU 2` 存在外部 `436 MiB` 占用运行于 `3×V100 [0/1/3]`；`R22` 于 `17:23:32` 结束 `over=514` 后，在 `R23` 出现单条原生 C++ 线程长时间满核自旋阻塞主流程，已清理所有进程与 `/dev/shm`、`nvidia-smi` 四卡回落 `0 MiB`）**：
+  - **重要负向定论（直接推翻 `v74` 下探 `minGpuPass3 = 80` 假设）**：
+    - `R18–22`（`p3_n = 430 -> 220`）启用 `1–2` 卡 GPU 后，`p3_s` 依次为 **`5.39 s / 4.77 s / 10.12 s / 11.15 s / 13.06 s`（均值 `8.90 s`）**；而同一区间 **`v73` 纯 `35` 核 CPU** 仅 **`4.44 s / 3.95 s / 3.22 s / 8.26 s / 3.10 s`（均值 `4.59 s`，快了近 `2×`！）**。
+    - 原因明确：`100–450` 条 `Pass 3` 重线经 GPU `Tier-B1 8M` 跑完 `gpu_s = 5.3–6.1 s` 后，最难几条依然因 `gpu_ov/gpu_fb` 回退 CPU 重跑（如 `R22` 总 pops 飙至 `133M` vs `v73 105M`），而 `35` 核 Xeon 吞吐反超 V100（`34M pops/s` vs `17M pops/s`）；同时把 `R23` 小批强拆给 `gpuPass3Items + cpuOverlapThread` 还可能触及嵌套/并发重尾阻塞隐患。
+  - **可安全保留成果**：`nativeUpdateHistAndFeedback` 36 核并行 `chunkNext` 前缀压缩在 `R1–22` 运行完全正常；`v75` 立即恢复 `v73` 的 **`minGpuPass3 = 512 / minGpuPass2 = 256`（绝不给 `<512` 降阈上 GPU）**，转而直接优化 **CPU A\* 本身（如 27-bit `G.edge` 高 5 位预剪枝标签零内存开销跳过 `G.geom` 读miss）与 `makePhys/missingPins` 并行加速**。
+
+### 2.55 `theia50per-ppt-hybrid-v75`（**`4×V100` 全程跑通并合法：恢复 `minGpuPass3=512`，测试 `27-bit G.edge` 高位 CPU 预剪枝（`excl=6.9% / uturn=0%`）；结果 `E2E = 848.73 s`（`Route design = 713.25 s`，`60` 轮），较 `v73`（`757.90 s`）退化 `+90.83 s`；定位到 `G.edge` 内层掩码开销与 `STATS_WL` 并发争抢 `Write EDIF`（`32.55 s`），不推送 GitHub**）
+- **改动文件**：`scratch/v75/` 下 `fides_cpu.cpp`、`v75_patch.py`、`prepare_v75.py`、`deploy_v75.py`、`launch_v75.py`、`record_rounds_v75.py`。
+- **核心改动**：在 `v73` 上① 保留 `v74` `nativeUpdateHistAndFeedback` 36 核并行 `chunkNext` 前缀压缩；② 撤销 `v74` 降阈（恢复 `minGpuPass3=512 / minGpuPass2=256 / Wide>=16`）；③ `fidesGpuInitMulti` 拷贝原始图后对 CPU 侧 `G.edge[e]` 打高 5 位预剪枝标签（`EDGE_NODE_MASK = 0x07FFFFFFu`、`EDGE_TAG_EXCL_NOBOUNCE = 1u<<27`、`EDGE_TAG_UTURN_DELAY = 1u<<28`），试图在 `expandNode` 读 `G.geom` 前跳过无效边。
+- **编译与冒烟**：`-Wall -Wextra -Werror` 下 4 份编译日志均 `0 B`、`V75_SMOKE_PASS`；`cpp_sha256`：`e3e11c4254bbf6e68d8b2b5898baee88801b9ec3cb35fae6c821e4b7fc697b6d`、`cuda_sha256`：`a507a2cb01f9781b8d6ba2d19b43d34bc60b454af5bfc37913b48820764f302`。
+- **全量 `THEIA_50per` 实测（`2026-11-26T18:06:11.94 -> 18:20:21.99`，`4×V100` 启动前均为 `0 MiB`，已验证 `F4_BASE_DCP unroutedPins=0 sharedPipNodes=0 pips=31061686`，`dcp_sha256=9278187ca3a6f6355996009bc151428808b70a64796fd5380a028c19ab56f7d5`）**：
+  - `FIDES_V75_EDGE_TAGS`：`total=391524527, excl=27059388 (6.9%), uturn=0 (0%), time_s=0.17`。
+  - **`E2E = 848.73 s`**（`848.730586254 s`，`route_wall = 836.344561654 s`，较 `v73` `757.90 s` **慢 `+90.83 s`**），`Route design = 713.25 s`（`Init = 22.79 s`、`Routing = 690.46 s`），`60` 轮（`R1-2=65.89 s`、`R3-5=136.07 s`、`R6-52=386.32 s`、`R1-52=588.28 s`、`R53-60=22.21 s`、`sum_cpp=610.49 s`），`WL = 18,962,246`，`Nodes popped = 28,664,349,422`（`gpu = 19,932,001,414`、`gpu_ns = 205.24 s`、`waves = 1847`），`SETPIPS = 8.53 s`、`STATS_WL = 15.60 s`、`Write EDIF = 25.498 s`、`Write EDIF & XDEF = 32.548 s`、`F4_V66_INPROC_DCP_CHECK pins=2.62 s overlap_wall=33.35 s write_s=33.35 s check_s=4.86 s stats_s=15.62 s`。
+- **退化根因定位（重要负向定论）**：
+  1. **高位标签剪枝得不偿失**：`excl` 仅命中 `6.9%`（`uturn = 0%`），却迫使其余 `93.1%` 正常边每次展开多做 `& EDGE_NODE_MASK`、双分支判定及条件 `__builtin_prefetch`，拖慢热循环并将总 pop 数推高到 `28.66B`（`v73` 为 `27.12B`），仅 `R1–52` 就比 `v73` 慢 `+48.69 s`（`588.28 s` vs `539.59 s`）、`R53+` 慢 `+21.33 s`；
+  2. **`STATS_WL` 仍与 `Write EDIF` 严重争抢**：`STATS_WL` 在 `checkFuture` 内用 `35T` `f4SharedPool` 并发扫描仍会直接拖垮 `Write EDIF & XDEF`（`v75` 涨至 `write_s=33.35 s, stats_s=15.62 s`；对比 `v70` 串行仅 `3.97 s + 15.59 s = 19.56 s`、`v73` 为 `20.57 s`）。
+
+### 2.56 `theia50per-ppt-hybrid-v76`（**`4×V100` 全程跑通并双盲合法：SoA `16B NodeGeomHot + 8B NodeGeomCold` + `slotForRead` 提前剪枝 + 除法消除 + `Pass 3 >= 6.5M` 重叠 + 去 `STATS_WL` 写盘争抢；`E2E = 719.80 s`（较 `v73 -38.10 s`，较 PPT Slide 15 `-87.44 s`），`Route design = 601.24 s`（`-37.73 s`），`sum_cpp = 499.61 s` 首次突破 `500 s`，已同步推送 GitHub `main`**）
+- **改动文件**：`scripts/v76/` 与 `src/cpp/fides_cpu.cpp`、`src/java/{PartialRouter.java,F1Corridor.java,FidesLaneGate.java,RWRoute.java}`。
+- **核心改动**：
+  1. **C++ A\* SoA 与零分支微架构提速**：撤销 `v75` `G.edge` 位掩码；将 32B `NodeGeom` 拆分为 **`16B NodeGeomHot`（L2/L3 缓存行密度翻倍：4 节点/64B）+ `8B NodeGeomCold`**（仅 `Local`/`q.cross` 读取 `tileId`/`endSlr`），并用 1-bit `PF_UTURN_DELAY` 代替 `delay` 浮点比较；`expandNode` 中先查线程本地 `S.slotForRead(child)` 再读全局 `G.geomHot[child]` 跳过已访问边；`SearchQuery` 预计算 `invBiasDenom` 并合并 `invSharing`，每条共享边减少 `3–5` 次 `divss`。
+  2. **`Pass 3 >= 6.5M` 并发重叠**：将 `cpuBypassPass3Items` 阈值从 `12M` 降至 **`6.5M`**，在 GPU `Tier-B1 8M` 启动前把必溢出超重网并行分流到 35 核 CPU 与 GPU 并发执行，显著压缩 `R8–16` 尾部等待（`R8`: `37.19->27.38 s`, `R10`: `32.29->14.17 s`, `R11`: `22.73->10.02 s`）。
+  3. **Java 主线程/并发清理**：保留 `v74/v75` 36 核 `parallel chunkNext`；将 `STATS_WL` 移出 `checkFuture` 改为 `writeCheckpoint` 完成后立即执行（`STATS_WL` 仅 `5.90 s`）；`F1Corridor` 64 分片 `IdentityHashMap` 预扩至 `1<<17` 并在 `f4Retired.isEmpty()` / `!cmap.isEmpty()` 时快路跳过；`f4NativeMaterializeAll` 收缩临时 `ArrayList` 预分配（`2048 -> 256`）与 `assignNodesToConnections` 预估容量。
+- **编译与冒烟**：`-Wall -Wextra -Werror` 下 4 份编译日志均 `0 B`、`V76_SMOKE_PASS`；`cpp_sha256`：`5042a448fcd3d9c981ec9cf6e9a543e3cf1d679c9c81f82ba05855e63b1d49dc`、`fides_gpu_cu_sha256`：`47c9a1c298fe557831a0dd9abc03f73143fc80a128d5e0903fd3c78848807e8c`。
+- **全量 `THEIA_50per` 实测（`2026-11-26T18:45:13.88 -> 18:57:14.88`，`4×V100` 全卡就绪，`dcp_sha256 = 4f5fea272f309ae1c48612e21a7e165ca150a07460f350cd7f51ddaffaaff7c2`，`SIZE = 365,966,843`）**：
+  - **`E2E = 719.80 s`**（`end_to_end_with_preparation_seconds = 719.799727628 s`，`route_wall = 716.97 s`，**较 `v73` `757.90 s` 快 `-38.10 s`**、较 `v70` `798.97 s` 快 `-79.17 s`、领先 PPT Slide 15 `807.24 s` **`-87.44 s`**）；
+  - **`Route design = 601.24 s`**（`Initialization = 22.25 s`、`Routing = 578.99 s`，**较 `v73` `638.97 s` 快 `-37.73 s`**）；
+  - **`58` 轮收敛（`over=0`）**：**`sum_cpp = 499.61 s`**（首次破 `500 s`，`p1 = 216.24 s` vs `v73 240.30 s`，`p2 = 38.24 s`，`p3 = 243.80 s` vs `v73 261.22 s`；`R1-2 = 63.57 s`、`R3-5 = 124.80 s`、`R6-17 = 195.55 s`、`R18-52 = 115.11 s`、`R53-58 = 0.58 s`、`sum_gpu = 175.72 s`、`waves = 1791`、`gpu_pops = 18,481,996,817`）；
+  - `Nodes popped = 26,424,392,144`、`Wirelength = 18,974,092`；
+  - `F4_V66_INPROC_DCP_CHECK pins=2.58s overlap_wall=31.43s write_s=25.52s check_s=5.32s stats_s=5.90s`，冷启 `F4BaselineDcpCheck`（`read=77.95s, pins=2.92s, pip_shards=2.42s, unrouted_scan=0.50s`）双盲复核 **`F4_BASE_DCP unroutedPins=0 sharedPipNodes=0 pips=31082870`** 完全一致。
+
 ---
 
-## 4. 面向全 13 用例全量复测与 PPT Slide 19 (`517.28 s`) 的下一步规划
+## 4. `v77` 优化方向与全 13 用例推进计划
 
-基于 `v73` 在 `THEIA_50per (757.90 s)` 与 `THEIA_20per (366.99 s)` 两大战场的实证大捷，下一步推进顺序：
-1. **完成其余 11 用例的 `v73all13` 全量回归并固化 `all13-rrg-cache`**：其余 11 个用例已由 `v70all13` 验证在 `7–45` 轮内收敛；切换至 `v73` + 硬链接缓存后可直接汇总全 13 用例最新总榜（仅 `THEIA_50per + THEIA_20per` 两项已把 13 用例总 E2E 基准拉低 **`~838 s`**）；
-2. **中段核心继续向 PPT `517.28 s` 下探**（参见 [NEXT_OPTIMIZATION_PLAN.md](file:///E:/AntigravityUsage/NEXT_OPTIMIZATION_PLAN.md)）：
-   - `makePhysNetNamesConsistent` (`11.72 s`) 与 `createMissingSitePinInsts` (`4.75 s`) 并行/减锁优化；
-   - **`R3–5 p1` 与 `R6–52 p3` 稀疏工作表 + 边描述符 `SoA`**（目标再降 `150–200 s`）；
-   - **`writeCheckpoint` + 后处理与特征重叠压缩**（目前 `Write EDIF & XDEF = 19.69 s`，可进一步检查 CPU 核配比与特征写入）。
+基于 **`v76`（当前线上最优：`THEIA_50per = 719.80 s` / `Route design = 601.24 s`）**：
+1. **用 `v76` 完成全 13 用例基线评测与回归验证**（`scripts/all13/run_all13.py --engine v76` 复用 `all13-rrg-cache`，重点复测 `THEIA_20per` 观察 `NodeGeomHot + slotForRead` 对 `366.99 s` 的进一步压缩）；
+2. **针对 `R1–2 corridor_s`、`RWRoute.preprocess`（`16.83 s`）、`Initialization`（`22.25 s`）、`V37_MATERIALIZE + POST`（`~27 s`）及 CPU `R3–5` / `R18–52` 微架构热路径继续向 PPT `517.28 s` 逼近**：
+   - 将 `F1Corridor.Box` 扁平化为原始 `int[]`（消除 `R1 12.30 s` 的对象创建与 `IdentityHashMap`）；
+   - 将 `G.dyn`（`8B` 中的只读 `hist` 与原子写 `occ` 分离，避免同一 cache line 被 `addToScope`/`ripUp` invalidation）；
+   - 继续拆解 `V37_MATERIALIZE` / `fixRoutes`（`7.96 s`）与 `Write XDEF`（`24.45 s`）。
