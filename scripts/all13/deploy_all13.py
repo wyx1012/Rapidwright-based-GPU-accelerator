@@ -16,7 +16,7 @@ known, rest = parser.parse_known_args()
 engine = known.engine
 
 # Any non-flag positional token in `rest` (not following a value flag) means cases were requested.
-value_flags = {"--phase", "--timeout"}
+value_flags = {"--phase", "--timeout", "--gpus"}
 cases_present = False
 skip_next = False
 for tok in rest:

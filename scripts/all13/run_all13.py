@@ -69,6 +69,7 @@ def make_worker(text):
         'exec(compile(source[:start], str(reference_worker), "exec"))\n',
         'exec(compile(source[:start], str(reference_worker), "exec"))\n'
         'case = json.loads((work / "case.json").read_text())\n'
+        'ALLOW_GPUS = set(int(g) for g in case["gpus"]) if case.get("gpus") else None\n'
         'dcp = Path(case["dcp"])\n'
         'CASE = case["name"]\n'
         '# the static RRG artifact is a per-design closure (nodes reachable from the design), so each case\n'
@@ -77,6 +78,14 @@ def make_worker(text):
         'manifest = work / "rrg.manifest.txt"\n'
         'env0["rrg"] = rrg\n'
         'env0["manifest"] = manifest\n')
+    text = once(
+        text,
+        'if "V100" in nm and dev_u != primary_uuid and dev_u not in busy_uuids and int(fm) >= 28500 and int(ut) <= 10:',
+        'if "V100" in nm and (ALLOW_GPUS is None or int(idx) in ALLOW_GPUS) and dev_u != primary_uuid and dev_u not in busy_uuids and int(fm) >= 28500 and int(ut) <= 10:')
+    text = once(
+        text,
+        'if ("V100" in name and int(free_mib) >= minimum_mib and int(utilization) <= 5',
+        'if ("V100" in name and (ALLOW_GPUS is None or int(index) in ALLOW_GPUS) and int(free_mib) >= minimum_mib and int(utilization) <= 5')
     text = once(
         text,
         '    feature = read(features_dir / "result.json")\n'
@@ -157,7 +166,7 @@ def unpin_f2_geometry(work):
         patch_java(work, edits)
 
 
-def clone(case, force):
+def clone(case, force, gpus=None):
     work = M / f"{ENGINE}all13-{case}"
     if work.exists():
         if not force:
@@ -175,7 +184,7 @@ def clone(case, force):
     dcp = CASES / case / f"{case}_partial_routed.dcp"
     if not dcp.is_file():
         raise RuntimeError(f"missing input {dcp}")
-    (work / "case.json").write_text(json.dumps(dict(name=case, dcp=str(dcp), engine=ENGINE), indent=1) + "\n")
+    (work / "case.json").write_text(json.dumps(dict(name=case, dcp=str(dcp), engine=ENGINE, gpus=gpus), indent=1) + "\n")
     (work / "worker.py").write_text(make_worker((SRC / "worker.py").read_text()))
     unpin_f2_geometry(work)
     py_compile = subprocess.run([sys.executable, "-m", "py_compile", str(work / "worker.py")],
@@ -335,10 +344,10 @@ def collect(case, work, dcp_in, rc, wall, timed_out):
     return row
 
 
-def prepare_case(case, force, use_cache=True):
+def prepare_case(case, force, use_cache=True, gpus=None):
     """Clone the configured engine build, patch the harness, and dump or reuse the design's RRG."""
     SUMMARY.mkdir(exist_ok=True)
-    work, dcp_in = clone(case, force)
+    work, dcp_in = clone(case, force, gpus=gpus)
     info = export_rrg(work, dcp_in, case, use_cache=use_cache)
     (work / "prepared.json").write_text(json.dumps(dict(engine=ENGINE, case=case, prepared_at=now(), **info), indent=1) + "\n")
     with (SUMMARY / "prepare.jsonl").open("a") as stream:
@@ -398,13 +407,15 @@ if __name__ == "__main__":
     parser.add_argument("--no-rrg-cache", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--timeout", type=float, default=5400)
+    parser.add_argument("--gpus", default=None)
     parser.add_argument("cases", nargs="+")
     args = parser.parse_args()
+    allow_gpus = [int(x.strip()) for x in args.gpus.split(",") if x.strip()] if args.gpus else None
     configure_engine(args.engine)
     for name in args.cases:
         try:
             if args.phase in ("prepare", "both"):
-                prepare_case(name, args.force, use_cache=not args.no_rrg_cache)
+                prepare_case(name, args.force, use_cache=not args.no_rrg_cache, gpus=allow_gpus)
             if args.phase in ("run", "both"):
                 run_case(name, args.timeout, args.keep_rrg)
         except Exception as exc:  # keep going with the remaining cases
