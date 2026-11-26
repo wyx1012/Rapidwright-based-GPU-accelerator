@@ -1,0 +1,855 @@
+﻿{
+  "engine": "v70",
+  "cases_passed": 13,
+  "total_e2e_s": 2798.95,
+  "total_route_design_s": 2248.16,
+  "prepare": [
+    {
+      "case": "mcml_RLE",
+      "prepared_at": "2026-11-26T11:52:24+08:00",
+      "export_s": 440.2,
+      "idmap_s": 29.2,
+      "rrg_bytes": 7015257652,
+      "manifest_bytes": 4437174046
+    },
+    {
+      "case": "RLE_BlobMerging",
+      "prepared_at": "2026-11-26T11:44:55+08:00",
+      "export_s": 452.3,
+      "idmap_s": 30.4,
+      "rrg_bytes": 7015272832,
+      "manifest_bytes": 4437181883
+    },
+    {
+      "case": "oc_des_des3perf",
+      "prepared_at": "2026-11-26T11:14:20+08:00",
+      "export_s": 432.2,
+      "idmap_s": 25.5,
+      "rrg_bytes": 7016356032,
+      "manifest_bytes": 4437792524
+    },
+    {
+      "case": "aquarius_b15_1",
+      "prepared_at": "2026-11-26T11:54:00+08:00",
+      "export_s": 490.6,
+      "idmap_s": 27.2,
+      "rrg_bytes": 7016465148,
+      "manifest_bytes": 4437753071
+    },
+    {
+      "case": "RS8FreqDecode",
+      "prepared_at": "2026-11-26T11:52:49+08:00",
+      "export_s": 448.7,
+      "idmap_s": 22.3,
+      "rrg_bytes": 7016807552,
+      "manifest_bytes": 4437929179
+    },
+    {
+      "case": "k_300dsp_300ram",
+      "prepared_at": "2026-11-26T11:44:31+08:00",
+      "export_s": 526.8,
+      "idmap_s": 22.5,
+      "rrg_bytes": 7095725172,
+      "manifest_bytes": 4479773992
+    },
+    {
+      "case": "k_100_dsp",
+      "prepared_at": "2026-11-26T11:37:22+08:00",
+      "export_s": 488.5,
+      "idmap_s": 24.1,
+      "rrg_bytes": 7099143244,
+      "manifest_bytes": 4481724888
+    },
+    {
+      "case": "k_140000fd_500000lut",
+      "prepared_at": "2026-11-26T11:45:19+08:00",
+      "export_s": 450.8,
+      "idmap_s": 23.7,
+      "rrg_bytes": 7099750856,
+      "manifest_bytes": 4482176941
+    },
+    {
+      "case": "THEIA_jpeg",
+      "prepared_at": "2026-11-26T11:26:01+08:00",
+      "export_s": 480.0,
+      "idmap_s": 24.1,
+      "rrg_bytes": 7074045288,
+      "manifest_bytes": 4467064021
+    },
+    {
+      "case": "THEIA",
+      "prepared_at": "2026-11-26T11:25:50+08:00",
+      "export_s": 467.9,
+      "idmap_s": 31.8,
+      "rrg_bytes": 7122599664,
+      "manifest_bytes": 4491970599
+    },
+    {
+      "case": "k_800_ram",
+      "prepared_at": "2026-11-26T11:36:44+08:00",
+      "export_s": 612.4,
+      "idmap_s": 28.1,
+      "rrg_bytes": 7258961980,
+      "manifest_bytes": 4563973181
+    },
+    {
+      "case": "THEIA_20per",
+      "prepared_at": "2026-11-26T11:35:10+08:00",
+      "export_s": 530.2,
+      "idmap_s": 26.1,
+      "rrg_bytes": 7263670912,
+      "manifest_bytes": 4563051471
+    },
+    {
+      "case": "THEIA_50per",
+      "prepared_at": "2026-11-26T11:28:46+08:00",
+      "export_s": 656.2,
+      "idmap_s": 24.2,
+      "rrg_bytes": 7485918920,
+      "manifest_bytes": 4673146188
+    }
+  ],
+  "results": [
+    {
+      "case": "mcml_RLE",
+      "finished_at": "2026-11-26T12:13:44+08:00",
+      "input_bytes": 2211702,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 35.03,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 32.523450858,
+      "route_wall_s": 31.782916253,
+      "route_design_s": 19.82,
+      "wirelength": 156473,
+      "nodes_popped": 26377861,
+      "routing_profile": "nodes=25113, connections=20259, bbox=2/10, initialPresentCongestionFactor=1.0",
+      "rounds": 45,
+      "last_round_iter": 45,
+      "last_round_over": 0,
+      "direct_connections": 271,
+      "feature_rows": 20530,
+      "gpu_commits": 32771,
+      "gpu_pops": 11242275,
+      "gpu_ns": 360300260,
+      "gpu_waves": 13,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 154264
+      },
+      "out_dcp_bytes": 3882648,
+      "out_dcp_sha256": "09564f1a5aad864b29ea4a35973cd9e47c44ae2eb31ed2d3e38a4d01b6f771ba",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-mcml_RLE",
+      "cold_check": {
+        "seconds": 4.74,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 154264
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "mcml_RLE",
+        "prepared_at": "2026-11-26T11:52:24+08:00",
+        "export_s": 440.2,
+        "idmap_s": 29.2,
+        "rrg_bytes": 7015257652,
+        "manifest_bytes": 4437174046
+      }
+    },
+    {
+      "case": "RLE_BlobMerging",
+      "finished_at": "2026-11-26T12:14:21+08:00",
+      "input_bytes": 2254488,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 30.03,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 26.562322545,
+      "route_wall_s": 25.938223981,
+      "route_design_s": 13.65,
+      "wirelength": 80508,
+      "nodes_popped": 11709844,
+      "routing_profile": "nodes=25105, connections=20261, bbox=2/10, initialPresentCongestionFactor=1.0",
+      "rounds": 12,
+      "last_round_iter": 12,
+      "last_round_over": 0,
+      "direct_connections": 271,
+      "feature_rows": 20532,
+      "gpu_commits": 32339,
+      "gpu_pops": 7241809,
+      "gpu_ns": 66697904,
+      "gpu_waves": 10,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 140201
+      },
+      "out_dcp_bytes": 3805414,
+      "out_dcp_sha256": "f3d66b4374ccd176d747712e2db209f79ba6ba4600f9808e31cba8d3d237515b",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-RLE_BlobMerging",
+      "cold_check": {
+        "seconds": 4.65,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 140201
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "RLE_BlobMerging",
+        "prepared_at": "2026-11-26T11:44:55+08:00",
+        "export_s": 452.3,
+        "idmap_s": 30.4,
+        "rrg_bytes": 7015272832,
+        "manifest_bytes": 4437181883
+      }
+    },
+    {
+      "case": "oc_des_des3perf",
+      "finished_at": "2026-11-26T11:14:50+08:00",
+      "input_bytes": 2576345,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 30.02,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 27.598654042,
+      "route_wall_s": 26.916313094,
+      "route_design_s": 14.22,
+      "wirelength": 147874,
+      "nodes_popped": 19270370,
+      "routing_profile": "nodes=36109, connections=25972, bbox=2/10, initialPresentCongestionFactor=1.0",
+      "rounds": 15,
+      "last_round_iter": 15,
+      "last_round_over": 0,
+      "direct_connections": 0,
+      "feature_rows": 25972,
+      "gpu_commits": 43370,
+      "gpu_pops": 10352194,
+      "gpu_ns": 468309312,
+      "gpu_waves": 113,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 186850
+      },
+      "out_dcp_bytes": 4446128,
+      "out_dcp_sha256": "41401789f533d11588b1bc6ffc4c4d281ea4f2acd85e022bb67355bed6de716f",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-oc_des_des3perf",
+      "cold_check": {
+        "seconds": 4.77,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 186850
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "oc_des_des3perf",
+        "prepared_at": "2026-11-26T11:14:20+08:00",
+        "export_s": 432.2,
+        "idmap_s": 25.5,
+        "rrg_bytes": 7016356032,
+        "manifest_bytes": 4437792524
+      }
+    },
+    {
+      "case": "aquarius_b15_1",
+      "finished_at": "2026-11-26T12:15:02+08:00",
+      "input_bytes": 2744119,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 35.03,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 30.111542676,
+      "route_wall_s": 29.435958093,
+      "route_design_s": 17.98,
+      "wirelength": 115577,
+      "nodes_popped": 31018426,
+      "routing_profile": "nodes=36006, connections=29451, bbox=2/10, initialPresentCongestionFactor=1.0",
+      "rounds": 20,
+      "last_round_iter": 20,
+      "last_round_over": 0,
+      "direct_connections": 73,
+      "feature_rows": 29524,
+      "gpu_commits": 48354,
+      "gpu_pops": 10210019,
+      "gpu_ns": 102398873,
+      "gpu_waves": 14,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 216021
+      },
+      "out_dcp_bytes": 4480822,
+      "out_dcp_sha256": "d51e62c75c3094f9bcea5d69a959b5d441dfc9763a51e790b8dca82b7ff15eff",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-aquarius_b15_1",
+      "cold_check": {
+        "seconds": 4.72,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 216021
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "aquarius_b15_1",
+        "prepared_at": "2026-11-26T11:54:00+08:00",
+        "export_s": 490.6,
+        "idmap_s": 27.2,
+        "rrg_bytes": 7016465148,
+        "manifest_bytes": 4437753071
+      }
+    },
+    {
+      "case": "RS8FreqDecode",
+      "finished_at": "2026-11-26T12:15:40+08:00",
+      "input_bytes": 2872318,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 30.03,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 28.114437438,
+      "route_wall_s": 27.379664374,
+      "route_design_s": 14.75,
+      "wirelength": 109219,
+      "nodes_popped": 19150044,
+      "routing_profile": "nodes=37664, connections=31295, bbox=2/10, initialPresentCongestionFactor=1.0",
+      "rounds": 12,
+      "last_round_iter": 12,
+      "last_round_over": 0,
+      "direct_connections": 0,
+      "feature_rows": 31295,
+      "gpu_commits": 50579,
+      "gpu_pops": 8694297,
+      "gpu_ns": 162686665,
+      "gpu_waves": 43,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 187826
+      },
+      "out_dcp_bytes": 4317692,
+      "out_dcp_sha256": "c89924d2566aa72ed184f798473b7dab56281609592472eff17662503abcdef4",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-RS8FreqDecode",
+      "cold_check": {
+        "seconds": 4.88,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 187826
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "RS8FreqDecode",
+        "prepared_at": "2026-11-26T11:52:49+08:00",
+        "export_s": 448.7,
+        "idmap_s": 22.3,
+        "rrg_bytes": 7016807552,
+        "manifest_bytes": 4437929179
+      }
+    },
+    {
+      "case": "k_300dsp_300ram",
+      "finished_at": "2026-11-26T12:17:01+08:00",
+      "input_bytes": 49602859,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 75.06,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 70.689848821,
+      "route_wall_s": 69.429297651,
+      "route_design_s": 31.46,
+      "wirelength": 1008311,
+      "nodes_popped": 109791016,
+      "routing_profile": "nodes=917102, connections=676544, bbox=12/60, initialPresentCongestionFactor=4.0",
+      "rounds": 7,
+      "last_round_iter": 7,
+      "last_round_over": 0,
+      "direct_connections": 0,
+      "feature_rows": 676544,
+      "gpu_commits": 778363,
+      "gpu_pops": 85963007,
+      "gpu_ns": 636339275,
+      "gpu_waves": 71,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 3611508
+      },
+      "out_dcp_bytes": 55669244,
+      "out_dcp_sha256": "f829f86a034b860bb58688b161b7ce25410ce5df9334e420ae333d805b7f7097",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-k_300dsp_300ram",
+      "cold_check": {
+        "seconds": 20.13,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 3611508
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "k_300dsp_300ram",
+        "prepared_at": "2026-11-26T11:44:31+08:00",
+        "export_s": 526.8,
+        "idmap_s": 22.5,
+        "rrg_bytes": 7095725172,
+        "manifest_bytes": 4479773992
+      }
+    },
+    {
+      "case": "k_100_dsp",
+      "finished_at": "2026-11-26T12:18:38+08:00",
+      "input_bytes": 58374695,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 75.06,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 69.614314607,
+      "route_wall_s": 68.214655135,
+      "route_design_s": 37.17,
+      "wirelength": 1431769,
+      "nodes_popped": 148046020,
+      "routing_profile": "nodes=910715, connections=676196, bbox=12/60, initialPresentCongestionFactor=4.0",
+      "rounds": 10,
+      "last_round_iter": 10,
+      "last_round_over": 0,
+      "direct_connections": 1,
+      "feature_rows": 676197,
+      "gpu_commits": 775992,
+      "gpu_pops": 97425932,
+      "gpu_ns": 725147767,
+      "gpu_waves": 76,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 3663704
+      },
+      "out_dcp_bytes": 50900970,
+      "out_dcp_sha256": "431afbc1818475af815756b5a4911f82a6635852316ce98be4c558404c2dd40c",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-k_100_dsp",
+      "cold_check": {
+        "seconds": 18.46,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 3663704
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "k_100_dsp",
+        "prepared_at": "2026-11-26T11:37:22+08:00",
+        "export_s": 488.5,
+        "idmap_s": 24.1,
+        "rrg_bytes": 7099143244,
+        "manifest_bytes": 4481724888
+      }
+    },
+    {
+      "case": "k_140000fd_500000lut",
+      "finished_at": "2026-11-26T12:20:14+08:00",
+      "input_bytes": 58538993,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 75.07,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 69.948846765,
+      "route_wall_s": 68.657570426,
+      "route_design_s": 32.87,
+      "wirelength": 1446095,
+      "nodes_popped": 142023431,
+      "routing_profile": "nodes=924284, connections=680593, bbox=12/60, initialPresentCongestionFactor=4.0",
+      "rounds": 8,
+      "last_round_iter": 8,
+      "last_round_over": 0,
+      "direct_connections": 1,
+      "feature_rows": 680594,
+      "gpu_commits": 790946,
+      "gpu_pops": 100879112,
+      "gpu_ns": 734919927,
+      "gpu_waves": 75,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 3697806
+      },
+      "out_dcp_bytes": 49769438,
+      "out_dcp_sha256": "1fdf641a13ea6c7b07464e28941368d8dfe52d2478e5f829685498d7a4692fc4",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-k_140000fd_500000lut",
+      "cold_check": {
+        "seconds": 18.61,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 3697806
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "k_140000fd_500000lut",
+        "prepared_at": "2026-11-26T11:45:19+08:00",
+        "export_s": 450.8,
+        "idmap_s": 23.7,
+        "rrg_bytes": 7099750856,
+        "manifest_bytes": 4482176941
+      }
+    },
+    {
+      "case": "THEIA_jpeg",
+      "finished_at": "2026-11-26T12:22:50+08:00",
+      "input_bytes": 66406833,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 135.12,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 133.339688122,
+      "route_wall_s": 131.840458891,
+      "route_design_s": 98.79,
+      "wirelength": 3121490,
+      "nodes_popped": 2914910751,
+      "routing_profile": "nodes=808137, connections=639637, bbox=12/60, initialPresentCongestionFactor=4.0",
+      "rounds": 31,
+      "last_round_iter": 31,
+      "last_round_over": 0,
+      "direct_connections": 16576,
+      "feature_rows": 656213,
+      "gpu_commits": 838940,
+      "gpu_pops": 1515918103,
+      "gpu_ns": 10735377533,
+      "gpu_waves": 228,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 5024899
+      },
+      "out_dcp_bytes": 79443575,
+      "out_dcp_sha256": "4b21ce8b7a0b168f25408213ba5d0e0abd2df2388a85bbb4b5845aba7cdcc710",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-THEIA_jpeg",
+      "cold_check": {
+        "seconds": 22.67,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 5024899
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "THEIA_jpeg",
+        "prepared_at": "2026-11-26T11:26:01+08:00",
+        "export_s": 480.0,
+        "idmap_s": 24.1,
+        "rrg_bytes": 7074045288,
+        "manifest_bytes": 4467064021
+      }
+    },
+    {
+      "case": "THEIA",
+      "finished_at": "2026-11-26T12:26:00+08:00",
+      "input_bytes": 77596013,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 165.15,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 162.741950761,
+      "route_wall_s": 161.109456068,
+      "route_design_s": 125.82,
+      "wirelength": 5112646,
+      "nodes_popped": 5179681972,
+      "routing_profile": "nodes=1284615, connections=1033193, bbox=12/60, initialPresentCongestionFactor=4.0",
+      "rounds": 31,
+      "last_round_iter": 31,
+      "last_round_over": 0,
+      "direct_connections": 7568,
+      "feature_rows": 1040761,
+      "gpu_commits": 1382009,
+      "gpu_pops": 3252240296,
+      "gpu_ns": 25211198580,
+      "gpu_waves": 387,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 7842988
+      },
+      "out_dcp_bytes": 100793340,
+      "out_dcp_sha256": "7739d737a150b4eae6bda3dde1921cd3cbe9c09cdd81a859ffb866ed60ee86c0",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-THEIA",
+      "cold_check": {
+        "seconds": 28.07,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 7842988
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 430 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "THEIA",
+        "prepared_at": "2026-11-26T11:25:50+08:00",
+        "export_s": 467.9,
+        "idmap_s": 31.8,
+        "rrg_bytes": 7122599664,
+        "manifest_bytes": 4491970599
+      }
+    },
+    {
+      "case": "k_800_ram",
+      "finished_at": "2026-11-26T12:29:40+08:00",
+      "input_bytes": 112025303,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 190.17,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 184.604834702,
+      "route_wall_s": 182.80449774,
+      "route_design_s": 60.5,
+      "wirelength": 3090310,
+      "nodes_popped": 572713558,
+      "routing_profile": "nodes=2654442, connections=2072669, bbox=12/60, initialPresentCongestionFactor=4.0",
+      "rounds": 14,
+      "last_round_iter": 14,
+      "last_round_over": 0,
+      "direct_connections": 0,
+      "feature_rows": 2072669,
+      "gpu_commits": 2434264,
+      "gpu_pops": 373548607,
+      "gpu_ns": 2407316100,
+      "gpu_waves": 215,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 10482493
+      },
+      "out_dcp_bytes": 130638134,
+      "out_dcp_sha256": "e451c3fe4a4a07b878e6daeff3f6b4ddefc84e0220dcbbe8e97013b854ed719e",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-k_800_ram",
+      "cold_check": {
+        "seconds": 40.71,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 10482493
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "k_800_ram",
+        "prepared_at": "2026-11-26T11:36:44+08:00",
+        "export_s": 612.4,
+        "idmap_s": 28.1,
+        "rrg_bytes": 7258961980,
+        "manifest_bytes": 4563973181
+      }
+    },
+    {
+      "case": "THEIA_20per",
+      "finished_at": "2026-11-26T12:49:51+08:00",
+      "input_bytes": 138262735,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 1166.11,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 1162.829220944,
+      "route_wall_s": 1160.554263452,
+      "route_design_s": 1096.54,
+      "wirelength": 11677328,
+      "nodes_popped": 19629674215,
+      "routing_profile": "nodes=3028390, connections=2458304, bbox=12/60, initialPresentCongestionFactor=4.0",
+      "rounds": 74,
+      "last_round_iter": 74,
+      "last_round_over": 0,
+      "direct_connections": 32960,
+      "feature_rows": 2491264,
+      "gpu_commits": 3304125,
+      "gpu_pops": 12728144561,
+      "gpu_ns": 61135345391,
+      "gpu_waves": 581,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 18892286
+      },
+      "out_dcp_bytes": 237207134,
+      "out_dcp_sha256": "d2cc1ae8eff2e2938e719e59d12e69ceede116a6a5f91a39015793b754ae0e19",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-THEIA_20per",
+      "cold_check": {
+        "seconds": 56.7,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 18892286
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "THEIA_20per",
+        "prepared_at": "2026-11-26T11:35:10+08:00",
+        "export_s": 530.2,
+        "idmap_s": 26.1,
+        "rrg_bytes": 7263670912,
+        "manifest_bytes": 4563051471
+      }
+    },
+    {
+      "case": "THEIA_50per",
+      "finished_at": "2026-11-26T13:04:17+08:00",
+      "input_bytes": 289282951,
+      "worker_rc": 0,
+      "timed_out": false,
+      "wall_s": 805.7,
+      "status": "passed",
+      "stage": "complete",
+      "error": null,
+      "e2e_s": 800.272392578,
+      "route_wall_s": 797.183179749,
+      "route_design_s": 684.59,
+      "wirelength": 18992779,
+      "nodes_popped": 26727756679,
+      "routing_profile": "nodes=5767244, connections=4909155, bbox=12/60, initialPresentCongestionFactor=4.0",
+      "rounds": 63,
+      "last_round_iter": 63,
+      "last_round_over": 0,
+      "direct_connections": 43564,
+      "feature_rows": 4952719,
+      "gpu_commits": 6888508,
+      "gpu_pops": 18908288986,
+      "gpu_ns": 179495709670,
+      "gpu_waves": 1853,
+      "legality_mode": "in_process_parallel_with_write",
+      "inproc_legality": {
+        "unroutedPins": 0,
+        "sharedPipNodes": 0,
+        "pips": 31086191
+      },
+      "out_dcp_bytes": 365953942,
+      "out_dcp_sha256": "051234672209093cb63199a2c77670879cdb317b933cbbfc883e72630aa4226a",
+      "work": "/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v70all13-THEIA_50per",
+      "cold_check": {
+        "seconds": 95.13,
+        "line": {
+          "unroutedPins": 0,
+          "sharedPipNodes": 0,
+          "pips": 31086191
+        }
+      },
+      "gpu_before": [
+        "0, 312 MiB, 0 %",
+        "1, 4 MiB, 0 %",
+        "2, 4 MiB, 0 %",
+        "3, 4 MiB, 0 %"
+      ],
+      "prepare": {
+        "case": "THEIA_50per",
+        "prepared_at": "2026-11-26T11:28:46+08:00",
+        "export_s": 656.2,
+        "idmap_s": 24.2,
+        "rrg_bytes": 7485918920,
+        "manifest_bytes": 4673146188
+      }
+    }
+  ]
+}
