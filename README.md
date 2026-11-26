@@ -20,13 +20,14 @@ Multi-GPU (`4 × Tesla V100-PCIE-32GB`) + 36-core NUMA C++/Java hybrid router ac
 | **End-to-End (`E2E`)** | `798.97 s` (`13m 18.97s`) | First run to beat PPT Slide 15 (`807.24 s`) by `-8.27 s` |
 | **`Route design` / Convergence** | `684.62 s` (`64` rounds, `over=0`) | `R1–52 = 520.40 s`, tail `R53–64 = 60.83 s`, `WL = 19,001,226`, `pips=31075870` |
 
-## Full 13-Case Competition Suite Verification (`v70`)
+## Full 13-Case Competition Suite & `v73` Re-Verification
 
-Using the case-generic runner ([scripts/all13/run_all13.py](scripts/all13/run_all13.py)), `v70` completed **all `13/13` competition benchmarks** cleanly with `over=0` and double-verified legality (`unroutedPins=0, sharedPipNodes=0` in both in-process parallel verification and cold `F4BaselineDcpCheck`):
+Using the case-generic runner ([scripts/all13/run_all13.py](scripts/all13/run_all13.py), now defaulted to `--engine v73` with `all13-rrg-cache` hardlink caching):
 
-- **Total E2E / Route Design**: **`2,798.95 s`** / **`2,248.16 s`** across all 13 cases (`mcml_RLE`, `RLE_BlobMerging`, `oc_des_des3perf`, `aquarius_b15_1`, `RS8FreqDecode`, `k_300dsp_300ram`, `k_100_dsp`, `k_140000fd_500000lut`, `THEIA_jpeg`, `THEIA`, `k_800_ram`, `THEIA_20per`, `THEIA_50per`).
-- **Key Outlier Found**: `THEIA_20per` (`1,162.83 s`, `74` rounds) exceeded `THEIA_50per` (`800.27 s`, `63` rounds) solely due to `762.90 s` spent in `R54–74` (`widenNbr` 128-net neighbor ripup oscillation after reaching `over=5` at `R53` in `273.99 s`), confirming micro-tail de-jittering as a high-leverage optimization for `v73+`.
-- Full table & per-case metrics: [docs/v70_all13_benchmark.md](docs/v70_all13_benchmark.md) and [results/v70_all13/summary.json](results/v70_all13/summary.json).
+- **`v73` `THEIA_20per` Re-Test (`3.17×` E2E Speedup)**:
+  - **`E2E = 366.99 s`** (`route_wall = 364.61 s`, **`Route design = 296.16 s`**) vs `v70` `1,162.83 s` (`Route design = 1,096.54 s`) — **`-795.84 s` faster**, resolving cleanly in **`53` rounds (`over=0`)** with **`WL = 11,661,635`** (`-15,693`) and double-verified legality (`unroutedPins=0, sharedPipNodes=0, pips=18882479`, recorded in [results/v73_all13/summary.jsonl](results/v73_all13/summary.jsonl)).
+- **`v70` Baseline 13/13 Full Sweep** (all `13/13` passed cleanly with double-verified DCP legality):
+  - **Total E2E / Route Design**: **`2,798.95 s`** / **`2,248.16 s`** across `mcml_RLE`, `RLE_BlobMerging`, `oc_des_des3perf`, `aquarius_b15_1`, `RS8FreqDecode`, `k_300dsp_300ram`, `k_100_dsp`, `k_140000fd_500000lut`, `THEIA_jpeg`, `THEIA`, `k_800_ram`, `THEIA_20per`, and `THEIA_50per` ([docs/v70_all13_benchmark.md](docs/v70_all13_benchmark.md), [results/v70_all13/summary.json](results/v70_all13/summary.json)).
 
 ## Key Engineering Highlights (`v22 -> v73`)
 
@@ -35,7 +36,7 @@ Using the case-generic runner ([scripts/all13/run_all13.py](scripts/all13/run_al
    - Overlaps static RRG pre-allocation (`nativePreinitStatic`), `rrg.idmap.bin` preload, and Java static init (`10.52–12.10 s`) inside `Design.readCheckpoint`.
    - 36-core parallel `PartialRouter.preprocess` + deterministic `getUnroutedPins` + background async `F2Prewarm` (relaxed in `v73` for native 13-case compatibility).
    - Overlaps `writeCheckpoint` (`20.57 s`) sequentially in a single `<= 34`-worker `ForkJoinPool` with 64-shard PIP exclusivity verification (`check_s = 3.01 s`) and deferred `STATS_WL` (`stats_s = 9.11 s`), eliminating both cold JVM DCP re-read and 72-thread CPU contention while skipping redundant `checkPIPsUsage` / `getAllTiles` scans.
-3. **De-Jittered Micro-Tail Convergence (`v73`)**: Tightened neighbor ripup caps (`nbrLim = 20u` at `over <= 2`, `36u` under `widenNbr`, `maxNbrNet = 64`), single-item unbounded escape guard (`maxUnbounded = 1`), and gentler `microMult (2× / 3×)` reduce `THEIA_50per` tail (`R53–57`) to **`0.88 s`** (`57` rounds total) while targeting `THEIA_20per` `over=5..16` tail oscillation.
+3. **De-Jittered Micro-Tail Convergence (`v73`)**: Tightened neighbor ripup caps (`nbrLim = 20u` at `over <= 2`, `36u` under `widenNbr`, `maxNbrNet = 64`), single-item unbounded escape guard (`maxUnbounded = 1`), and gentler `microMult (2× / 3×)` reduce `THEIA_50per` tail (`R53–57`) to **`0.88 s`** (`57` rounds total) and accelerate `THEIA_20per` `3.17×` (`1,162.83 s -> 366.99 s`, `53` rounds).
 
 ## Repository Layout
 

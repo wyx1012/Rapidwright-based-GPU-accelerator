@@ -915,13 +915,18 @@
     - `R1–2 = 64.33 s`、`R3–5 = 130.44 s`、`R6–52 = 344.82 s` → `R1–52 = 539.59 s`，`R53–57 = 0.88 s`，`sum_cpp = 540.47 s`（`v37_gpu_pops=18,887,424,403, gpu_ns=186.73 s, gpu_waves=1,863`）；
     - `Post (assign=3.00 s, fix=6.95 s, srcPin=1.81 s, SETPIPS=5.58 s, CHECKPIPS=跳过)`、`STATS_WL=9.11 s`（写盘期隐藏）、`Write EDIF & XDEF=19.690 s`；
     - `Total wirelength = 18,964,265`（较 `v70 -36,961`）、`Nodes popped = 27,124,486,998`、`dcp_sha256`：`bcaf6cea9a625b8de1102e148d1eb2851602bcfb3323473ad588b04c8214ba40`。
+  - **`THEIA_20per` 全 13 用例首位复测暴降 `3.17×`（`v73all13-THEIA_20per`，`2026-11-26T16:12:05 -> 16:18:16`）**：
+    - 更新 [run_all13.py](file:///E:/AntigravityUsage/Rapidwright-based-GPU-accelerator/scripts/all13/run_all13.py) 支持 `--engine v73`、跳过 `F2Prewarm` 已通用化的补丁并引入 `all13-rrg-cache/<case>` 硬链接 RRG 缓存；
+    - **`E2E = 366.99 s`**（对比 `v70` `1,162.83 s` 暴降 **`-795.84 s` / `3.17×` 加速**）、`route_wall = 364.61 s`、**`Route design = 296.16 s`**（对比 `v70` `1,096.54 s` 暴降 **`-800.38 s` / `3.70×` 加速**）；
+    - **`53` 轮直接清零 `over=0`**（对比 `v70` `74` 轮省 **`-21` 轮**，原 `R54–74` 消耗 `762.90 s` 的 `128` 邻域震荡完全消失：`R48–53` 在 `7.90 s` 内平稳归零）、`Wirelength = 11,661,635`（较 `v70 11,677,328` 缩短 `-15,693`）；
+    - `F4_V66_INPROC_DCP_CHECK pins=1.71s overlap_wall=11.87s write_s=11.87s check_s=1.49s stats_s=3.09s`，进程内与冷启 `F4BaselineDcpCheck` (`57.99s`) 双盲复核 **`unroutedPins=0 sharedPipNodes=0 pips=18882479`** 逐字一致。
 
 ---
 
-## 4. 面向全 13 用例复测与 PPT Slide 19 (`517.28 s`) 的下一步规划
+## 4. 面向全 13 用例全量复测与 PPT Slide 19 (`517.28 s`) 的下一步规划
 
-基于 `v73` 在 `THEIA_50per` 上取得 **`E2E = 757.90 s`（尾盘 `0.88 s`）** 的实证突破，下一步推进顺序：
-1. **将 `v73` 部署并复测 `THEIA_20per`（及全 13 用例）**：验证收窄的 `nbrLim (20–36u)`、`maxNbrNet=64` 与柔和 `microMult (2×/3×)` 是否如预期大幅砍掉 `THEIA_20per` 在 `v70` 下耗时 `762.90 s` 的 `R54–74` 尾盘拉锯，同时让 [run_all13.py](file:///E:/AntigravityUsage/Rapidwright-based-GPU-accelerator/scripts/all13/run_all13.py) 直接复用通用 `v73`（并避免重复 RRG 导出浪费）；
+基于 `v73` 在 `THEIA_50per (757.90 s)` 与 `THEIA_20per (366.99 s)` 两大战场的实证大捷，下一步推进顺序：
+1. **完成其余 11 用例的 `v73all13` 全量回归并固化 `all13-rrg-cache`**：其余 11 个用例已由 `v70all13` 验证在 `7–45` 轮内收敛；切换至 `v73` + 硬链接缓存后可直接汇总全 13 用例最新总榜（仅 `THEIA_50per + THEIA_20per` 两项已把 13 用例总 E2E 基准拉低 **`~838 s`**）；
 2. **中段核心继续向 PPT `517.28 s` 下探**（参见 [NEXT_OPTIMIZATION_PLAN.md](file:///E:/AntigravityUsage/NEXT_OPTIMIZATION_PLAN.md)）：
    - `makePhysNetNamesConsistent` (`11.72 s`) 与 `createMissingSitePinInsts` (`4.75 s`) 并行/减锁优化；
    - **`R3–5 p1` 与 `R6–52 p3` 稀疏工作表 + 边描述符 `SoA`**（目标再降 `150–200 s`）；

@@ -1,19 +1,13 @@
 #!/usr/bin/env python3
-"""Run the (unchanged) v70 hybrid GPU/CPU router on every competition case on gpu02.
+"""Run a hybrid GPU/CPU router build (default v73) on every competition case on gpu02.
 
-The v70 build directory (`theia50per-ppt-hybrid-v70`) is THEIA_50per-specific only in its Python
-harness (hard-coded DCP path, feature-table reference, 4952719-row feature check and output name).
-The routing engine (Java overlay, libfides_cpu.so, CUDA) is design independent and the device RRG
-(xcvu13p) is shared by all 13 cases.  This driver:
+Since v73, F2Prewarm.java no longer hard-codes THEIA_50per connection counts (if an older engine
+such as v70 is passed via --engine v70, unpin_f2_geometry automatically relaxes that pin).
+Each design's static RRG closure (rrg.bin + rrg.manifest.txt + rrg.idmap.bin) is cached under
+`all13-rrg-cache/<case>` via hardlinks so subsequent engine versions skip the ~500s export step.
 
-  1. clones the v70 build into a fresh per-case directory (`v70all13-<case>`, must be a child of
-     the measurement dir because the harness derives `measurement = work.parent`),
-  2. generates a case-aware `worker.py` (only harness constants are patched, no engine change),
-  3. launches it, waits (with a wall-clock cap), then
-  4. verifies legality twice (in-process check line + cold-JVM F4BaselineDcpCheck re-read),
-  5. appends the result to `v70all13-summary/summary.jsonl`.
-
-Usage: run_all13.py [--force] [--timeout SEC] case [case ...]
+Usage: run_all13.py [--engine v73] [--phase prepare|run|both] [--force] [--timeout SEC]
+                    [--keep-rrg] [--no-rrg-cache] case [case ...]
 """
 from datetime import datetime
 from pathlib import Path
@@ -31,9 +25,20 @@ import time
 assert socket.gethostname().split(".")[0] == "gpu02", "must run on gpu02"
 M = Path("/home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/"
          "f4-ppt-runtime-measurement-v1")
-SRC = M / "theia50per-ppt-hybrid-v70"
 CASES = Path("/home/yxwang1/FIDES/RapidWright2/cases")
-SUMMARY = M / "v70all13-summary"
+ENGINE = "v73"
+SRC = M / f"theia50per-ppt-hybrid-{ENGINE}"
+SUMMARY = M / f"{ENGINE}all13-summary"
+RRG_CACHE = M / "all13-rrg-cache"
+
+
+def configure_engine(engine):
+    global ENGINE, SRC, SUMMARY
+    ENGINE = engine
+    SRC = M / f"theia50per-ppt-hybrid-{ENGINE}"
+    SUMMARY = M / f"{ENGINE}all13-summary"
+    if not SRC.is_dir():
+        raise RuntimeError(f"missing engine build dir: {SRC}")
 
 SKIP_NAMES = {
     "status.json", "worker.log", "launch_receipt.json", "native_multichannel.log",
@@ -124,29 +129,36 @@ def patch_java(work, edits):
 
 
 def unpin_f2_geometry(work):
-    """F2Prewarm hard-codes the THEIA_50per connection counts (4_909_155 indirect / 4_952_719 all).
-    Replace only that equality pin by a sanity check; structural checks stay in place.
-    FidesLaneGate: name the first unmapped node in the fatal message (diagnostic only)."""
-    patch_java(work, [
-        ("F2Prewarm.java", "if (indirectCount != 4_909_155 || nAll != 4_952_719) {",
-         "if (indirectCount < 0 || nAll <= 0) {"),
-        ("FidesLaneGate.java",
-         'throw new IllegalStateException("Initial live nodes missing from the RRG manifest: " + unmappedLive);',
-         'throw new IllegalStateException("Initial live nodes missing from the RRG manifest: " + unmappedLive'
-         ' + " e.g. " + firstUnmapped);'),
-        ("RWRoute.java",
-         "            FidesRrgFlattener.flattenAndDump(routingGraph, config.getFidesRrgDumpPrefix(), presentCongestionFactor);\n",
-         "            FidesRrgFlattener.flattenAndDump(routingGraph, config.getFidesRrgDumpPrefix(), presentCongestionFactor);\n"
-         "            if (Boolean.getBoolean(\"fides.rrgDump.exitAfter\")) {\n"
-         "                System.out.println(\"F4_ALL13_RRG_DUMP_DONE\");\n"
-         "                System.out.flush();\n"
-         "                System.exit(0);\n"
-         "            }\n"),
-    ])
+    """Relax THEIA_50per-specific pins only if still present (already relaxed in v73+).
+    FidesLaneGate: name the first unmapped node in the fatal message (diagnostic only).
+    RWRoute: enable -Dfides.rrgDump.exitAfter=true exit hook after static RRG dump."""
+    edits = []
+    f2_text = (work / "F2Prewarm.java").read_text()
+    if "if (indirectCount != 4_909_155 || nAll != 4_952_719) {" in f2_text:
+        edits.append(("F2Prewarm.java", "if (indirectCount != 4_909_155 || nAll != 4_952_719) {",
+                      "if (indirectCount < 0 || nAll <= 0) {"))
+    gate_text = (work / "FidesLaneGate.java").read_text()
+    if 'throw new IllegalStateException("Initial live nodes missing from the RRG manifest: " + unmappedLive);' in gate_text:
+        edits.append(("FidesLaneGate.java",
+                      'throw new IllegalStateException("Initial live nodes missing from the RRG manifest: " + unmappedLive);',
+                      'throw new IllegalStateException("Initial live nodes missing from the RRG manifest: " + unmappedLive'
+                      ' + " e.g. " + firstUnmapped);'))
+    rw_text = (work / "RWRoute.java").read_text()
+    if 'fides.rrgDump.exitAfter' not in rw_text:
+        edits.append(("RWRoute.java",
+                      "            FidesRrgFlattener.flattenAndDump(routingGraph, config.getFidesRrgDumpPrefix(), presentCongestionFactor);\n",
+                      "            FidesRrgFlattener.flattenAndDump(routingGraph, config.getFidesRrgDumpPrefix(), presentCongestionFactor);\n"
+                      "            if (Boolean.getBoolean(\"fides.rrgDump.exitAfter\")) {\n"
+                      "                System.out.println(\"F4_ALL13_RRG_DUMP_DONE\");\n"
+                      "                System.out.flush();\n"
+                      "                System.exit(0);\n"
+                      "            }\n"))
+    if edits:
+        patch_java(work, edits)
 
 
 def clone(case, force):
-    work = M / f"v70all13-{case}"
+    work = M / f"{ENGINE}all13-{case}"
     if work.exists():
         if not force:
             raise RuntimeError(f"{work} exists (use --force)")
@@ -163,7 +175,7 @@ def clone(case, force):
     dcp = CASES / case / f"{case}_partial_routed.dcp"
     if not dcp.is_file():
         raise RuntimeError(f"missing input {dcp}")
-    (work / "case.json").write_text(json.dumps(dict(name=case, dcp=str(dcp)), indent=1) + "\n")
+    (work / "case.json").write_text(json.dumps(dict(name=case, dcp=str(dcp), engine=ENGINE), indent=1) + "\n")
     (work / "worker.py").write_text(make_worker((SRC / "worker.py").read_text()))
     unpin_f2_geometry(work)
     py_compile = subprocess.run([sys.executable, "-m", "py_compile", str(work / "worker.py")],
@@ -178,9 +190,27 @@ def java_cp(work):
                             (work / "runtime_classpath.txt").read_text().strip()])
 
 
-def export_rrg(work, dcp):
-    """Dump this design's static RRG artifact (rrg.bin + rrg.manifest.txt) exactly at the point the
-    production run would use it (end of initializeRouting), then stop; build the binary id-map cache."""
+def _link_or_copy(src_file, dst_file):
+    if dst_file.exists():
+        dst_file.unlink()
+    try:
+        os.link(src_file, dst_file)
+    except OSError:
+        shutil.copy2(src_file, dst_file)
+
+
+def export_rrg(work, dcp, case, use_cache=True):
+    """Dump or reuse this design's static RRG artifact (rrg.bin + rrg.manifest.txt + rrg.idmap.bin)."""
+    cache_dir = RRG_CACHE / case
+    cache_files = ("rrg.bin", "rrg.manifest.txt", "rrg.idmap.bin")
+    if use_cache and all((cache_dir / fn).is_file() and (cache_dir / fn).stat().st_size > 0 for fn in cache_files):
+        t0 = time.time()
+        for fn in cache_files:
+            _link_or_copy(cache_dir / fn, work / fn)
+        return dict(cache_hit=True, export_s=round(time.time() - t0, 2), idmap_s=0.0,
+                    rrg_bytes=(work / "rrg.bin").stat().st_size,
+                    manifest_bytes=(work / "rrg.manifest.txt").stat().st_size)
+
     java = str(Path(JAVAC).with_name("java"))
     t0 = time.time()
     argv = [java, "-Xmx256G", "-Dfides.rrgDump.exitAfter=true", "-cp", java_cp(work),
@@ -202,7 +232,12 @@ def export_rrg(work, dcp):
         rc = subprocess.run(idmap, cwd=work, stdout=stream, stderr=subprocess.STDOUT).returncode
     if rc or not (work / "rrg.idmap.bin").is_file():
         raise RuntimeError(f"idmap cache build failed rc={rc}; see {work}/build_idmap_cache.log")
-    return dict(export_s=round(t1 - t0, 1), idmap_s=round(time.time() - t1, 1),
+    idmap_s = round(time.time() - t1, 1)
+    if use_cache:
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        for fn in cache_files:
+            _link_or_copy(work / fn, cache_dir / fn)
+    return dict(cache_hit=False, export_s=round(t1 - t0, 1), idmap_s=idmap_s,
                 rrg_bytes=(work / "rrg.bin").stat().st_size,
                 manifest_bytes=(work / "rrg.manifest.txt").stat().st_size)
 
@@ -273,7 +308,7 @@ def collect(case, work, dcp_in, rc, wall, timed_out):
     inproc = re.findall(r"F4_BASE_DCP unroutedPins=(\d+) sharedPipNodes=(\d+) pips=(\d+)", log)
     direct = result.get("direct_precompute") or {}
     row = dict(
-        case=case, finished_at=now(), input_bytes=dcp_in.stat().st_size,
+        engine=ENGINE, case=case, finished_at=now(), input_bytes=dcp_in.stat().st_size,
         worker_rc=rc, timed_out=timed_out, wall_s=round(wall, 2),
         status=status.get("status"), stage=status.get("stage"), error=status.get("error"),
         e2e_s=result.get("end_to_end_with_preparation_seconds"),
@@ -289,6 +324,7 @@ def collect(case, work, dcp_in, rc, wall, timed_out):
         gpu_commits=result.get("v37_gpu_commits"), gpu_pops=result.get("v37_gpu_pops"),
         gpu_ns=result.get("v37_gpu_ns"), gpu_waves=result.get("v37_gpu_waves"),
         legality_mode=result.get("legality_mode"),
+        inproc_check_stats=grab(r"F4_V66_INPROC_DCP_CHECK\s+(.*)", log, str),
         inproc_legality=None if not inproc else dict(
             unroutedPins=int(inproc[-1][0]), sharedPipNodes=int(inproc[-1][1]), pips=int(inproc[-1][2])),
         out_dcp_bytes=dcp_out.stat().st_size if dcp_out.is_file() else None,
@@ -299,27 +335,27 @@ def collect(case, work, dcp_in, rc, wall, timed_out):
     return row
 
 
-def prepare_case(case, force):
-    """Clone the v70 build, patch the harness, dump the design's RRG, build the id-map cache."""
+def prepare_case(case, force, use_cache=True):
+    """Clone the configured engine build, patch the harness, and dump or reuse the design's RRG."""
     SUMMARY.mkdir(exist_ok=True)
     work, dcp_in = clone(case, force)
-    info = export_rrg(work, dcp_in)
-    (work / "prepared.json").write_text(json.dumps(dict(case=case, prepared_at=now(), **info), indent=1) + "\n")
+    info = export_rrg(work, dcp_in, case, use_cache=use_cache)
+    (work / "prepared.json").write_text(json.dumps(dict(engine=ENGINE, case=case, prepared_at=now(), **info), indent=1) + "\n")
     with (SUMMARY / "prepare.jsonl").open("a") as stream:
-        stream.write(json.dumps(dict(case=case, prepared_at=now(), **info)) + "\n")
-    print(now(), case, "PREPARED", json.dumps(info), flush=True)
+        stream.write(json.dumps(dict(engine=ENGINE, case=case, prepared_at=now(), **info)) + "\n")
+    print(now(), ENGINE, case, "PREPARED", json.dumps(info), flush=True)
 
 
 def run_case(case, timeout, keep_rrg=False):
     SUMMARY.mkdir(exist_ok=True)
-    work = M / f"v70all13-{case}"
+    work = M / f"{ENGINE}all13-{case}"
     if not (work / "prepared.json").is_file():
         raise RuntimeError(f"{work} is not prepared (run --phase prepare first)")
     dcp_in = Path(json.loads((work / "case.json").read_text())["dcp"])
     prepared = json.loads((work / "prepared.json").read_text())
     before = shm_dirs()
     gpus = gpu_snapshot()
-    print(now(), case, "GPU before:", gpus, flush=True)
+    print(now(), ENGINE, case, "GPU before:", gpus, flush=True)
     with (work / "worker.log").open("xb") as log:
         proc = subprocess.Popen([sys.executable, "-B", str(work / "worker.py")], cwd=work,
                                 stdin=subprocess.DEVNULL, stdout=log, stderr=subprocess.STDOUT,
@@ -348,7 +384,7 @@ def run_case(case, timeout, keep_rrg=False):
             (work / big).unlink()
     with (SUMMARY / "summary.jsonl").open("a") as stream:
         stream.write(json.dumps(row) + "\n")
-    print(now(), case, json.dumps({k: row[k] for k in (
+    print(now(), ENGINE, case, json.dumps({k: row[k] for k in (
         "status", "stage", "e2e_s", "route_design_s", "wirelength", "rounds", "last_round_over",
         "inproc_legality", "cold_check", "error") if k in row}), flush=True)
     return row
@@ -356,21 +392,24 @@ def run_case(case, timeout, keep_rrg=False):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
+    parser.add_argument("--engine", default="v73")
     parser.add_argument("--phase", choices=("prepare", "run", "both"), default="both")
     parser.add_argument("--keep-rrg", action="store_true")
+    parser.add_argument("--no-rrg-cache", action="store_true")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--timeout", type=float, default=5400)
     parser.add_argument("cases", nargs="+")
     args = parser.parse_args()
+    configure_engine(args.engine)
     for name in args.cases:
         try:
             if args.phase in ("prepare", "both"):
-                prepare_case(name, args.force)
+                prepare_case(name, args.force, use_cache=not args.no_rrg_cache)
             if args.phase in ("run", "both"):
                 run_case(name, args.timeout, args.keep_rrg)
         except Exception as exc:  # keep going with the remaining cases
             SUMMARY.mkdir(exist_ok=True)
             with (SUMMARY / "summary.jsonl").open("a") as stream:
-                stream.write(json.dumps(dict(case=name, finished_at=now(), status="driver_error",
+                stream.write(json.dumps(dict(engine=ENGINE, case=name, finished_at=now(), status="driver_error",
                                              error=repr(exc))) + "\n")
-            print(now(), name, "DRIVER_ERROR", repr(exc), flush=True)
+            print(now(), ENGINE, name, "DRIVER_ERROR", repr(exc), flush=True)
