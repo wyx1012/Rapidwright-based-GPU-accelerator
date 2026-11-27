@@ -774,10 +774,18 @@ public class PartialRouter extends RWRoute {
         return null;
     }
 
+    private static boolean hasFlag(String[] args, String flag) {
+        for (String a : args) {
+            if (flag.equals(a)) return true;
+        }
+        return false;
+    }
+
     static void startV67Preload(String[] rwrouteArgs) {
         final String rrgPath = extractFlagValue(rwrouteArgs, "--fidesLaneRrg");
         final String manifestPath = extractFlagValue(rwrouteArgs, "--fidesLaneManifest");
         final String workDir = System.getProperty("fides.ppt.f4.work");
+        final boolean needFullRrg = hasFlag(rwrouteArgs, "--fidesLaneVerify") || hasFlag(rwrouteArgs, "--timingDriven");
         if (rrgPath == null && workDir == null) return;
         v67PreloadFuture = java.util.concurrent.CompletableFuture.runAsync(() -> {
             long tWall0 = System.nanoTime();
@@ -786,7 +794,11 @@ public class PartialRouter extends RWRoute {
                 if (rrgPath != null && manifestPath != null) {
                     long t0 = System.nanoTime();
                     try {
-                        FidesLaneGate.preloadStatic(rrgPath, manifestPath);
+                        if (needFullRrg) {
+                            FidesLaneGate.preloadStatic(rrgPath, manifestPath);
+                        } else {
+                            FidesLaneGate.preloadStaticSlim(rrgPath, manifestPath, IntentCode.NODE_PINFEED.ordinal());
+                        }
                     } catch (Throwable t) {
                         System.out.println("WARN: F4_V67_JAVA_PRELOAD failed (fallback): " + t);
                     }

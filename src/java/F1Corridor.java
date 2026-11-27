@@ -84,6 +84,38 @@ final class F1Corridor {
             this.cost = cost;
         }
     }
+
+    private static final class Portal {
+        final int ingressX, ingressY, sllX, sllRawY, exitX, exitY;
+
+        Portal(FidesRrgLoader rrg, int ingress, int sll, int exit) {
+            ingressX = rrg.endTileX[ingress];
+            ingressY = rrg.endTileYRaw[ingress];
+            sllX = rrg.endTileX[sll];
+            sllRawY = rrg.endTileYRaw[sll];
+            exitX = rrg.endTileX[exit];
+            exitY = rrg.endTileYRaw[exit];
+        }
+
+        Portal(int ingressX, int ingressY, int sllX, int sllRawY, int exitX, int exitY) {
+            this.ingressX = ingressX;
+            this.ingressY = ingressY;
+            this.sllX = sllX;
+            this.sllRawY = sllRawY;
+            this.exitX = exitX;
+            this.exitY = exitY;
+        }
+
+        boolean inside(Box box) {
+            return box.contains(ingressX, ingressY) && box.contains(sllX, sllRawY)
+                    && box.contains(exitX, exitY);
+        }
+
+        int detour(int sx, int sy, int tx, int ty) {
+            return Math.abs(sx - ingressX) + Math.abs(sy - ingressY)
+                    + Math.abs(tx - exitX) + Math.abs(ty - exitY);
+        }
+    }
     private final Box fabric;
     private final Map<Long, Integer> occupancy = new HashMap<>();
     private static final int CAND_SHARDS = 64;
@@ -331,30 +363,7 @@ final class F1Corridor {
     }
 
 
-    // A portal records real CSR arcs ingress -> SLL -> exit. Its geometry
-    // does not pre-authorize those arcs on the current congestion snapshot.
-    private static final class Portal {
-        final int ingressX, ingressY, sllX, sllRawY, exitX, exitY;
 
-        Portal(FidesRrgLoader rrg, int ingress, int sll, int exit) {
-            ingressX = rrg.endTileX[ingress];
-            ingressY = rrg.endTileYRaw[ingress];
-            sllX = rrg.endTileX[sll];
-            sllRawY = rrg.endTileYRaw[sll];
-            exitX = rrg.endTileX[exit];
-            exitY = rrg.endTileYRaw[exit];
-        }
-
-        boolean inside(Box box) {
-            return box.contains(ingressX, ingressY) && box.contains(sllX, sllRawY)
-                    && box.contains(exitX, exitY);
-        }
-
-        int detour(int sx, int sy, int tx, int ty) {
-            return Math.abs(sx - ingressX) + Math.abs(sy - ingressY)
-                    + Math.abs(tx - exitX) + Math.abs(ty - exitY);
-        }
-    }
 
     private final Map<Integer, int[]> slrRows = new HashMap<>();
     private final Map<Long, java.util.List<Portal>> portals = new HashMap<>();
@@ -785,9 +794,50 @@ final class F1Corridor {
         return (effective.area() * 8 <= base.area() * 7) ? effective : null;
     }
 
+    int fabricLeft() { return fabric.left; }
+    int fabricBottom() { return fabric.bottom; }
+    int fabricRight() { return fabric.right; }
+    int fabricTop() { return fabric.top; }
+    int coarseLeft() { return coarseLeft; }
+    int coarseBottom() { return coarseBottom; }
+    int coarseHeight() { return coarseHeight; }
+    int[] coarseOccupancy() { return coarseOccupancy; }
+    boolean isCrossSlrCorridorEnabled() { return crossSlrCorridor; }
+
     void ensurePortalsIndexed(FidesRrgLoader rrg, RouteNodeGraph graph) {
         if (crossSlrCorridor && graph.wireIndicesLeadingToLaguna != null && !portalsIndexed) {
-            indexPortals(rrg, graph);
+            if (rrg.nodeType != null) {
+                indexPortals(rrg, graph);
+                return;
+            }
+            long t0 = System.nanoTime();
+            int maxSlr = -1;
+            for (Integer slr : slrRows.keySet()) {
+                if (slr != null && slr > maxSlr) maxSlr = slr;
+            }
+            int slrCap = Math.max(0, maxSlr + 1);
+            int[] slrMin = new int[slrCap];
+            int[] slrMax = new int[slrCap];
+            Arrays.fill(slrMin, Integer.MAX_VALUE);
+            Arrays.fill(slrMax, Integer.MIN_VALUE);
+            for (Map.Entry<Integer, int[]> e : slrRows.entrySet()) {
+                int s = e.getKey();
+                if (s >= 0 && s < slrCap) {
+                    slrMin[s] = e.getValue()[0];
+                    slrMax[s] = e.getValue()[1];
+                }
+            }
+            int[] flat = FidesNativeCpu.nativeExportPortals(slrMin, slrMax);
+            int count = flat.length / 8;
+            for (int i = 0; i < count; ++i) {
+                int base = i * 8;
+                long dir = cellKey(flat[base], flat[base + 1]);
+                portals.computeIfAbsent(dir, key -> new java.util.ArrayList<>())
+                        .add(new Portal(flat[base + 2], flat[base + 3], flat[base + 4],
+                                flat[base + 5], flat[base + 6], flat[base + 7]));
+            }
+            portalsIndexed = true;
+            System.out.printf("F4_V66_PORTALS portals=%d time_s=%.2f%n", count, (System.nanoTime() - t0) / 1e9);
         }
     }
 

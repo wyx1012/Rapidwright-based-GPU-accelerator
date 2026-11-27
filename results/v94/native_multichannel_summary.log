@@ -1,0 +1,161 @@
+==============================================================================
+==                              PartialRouter                               ==
+==============================================================================
+==============================================================================
+==               Reading DCP: THEIA_50per_partial_routed.dcp                ==
+==============================================================================
+ XML Parse & Device Load:     2.979s
+F4_V37_IDMAP_CACHE loaded=true n=92497168 runs=276420 time_s=4.795
+FIDES_NATIVE_CPU v67 preinit_static=true N=92497168 M=391524527 seg1=161862247 (41.34%) time_s=4.65
+F4_V67_PRELOAD java_s=4.85 cpp_s=5.08 wall_s=5.13
+    (Read PhysDB Caches):            (    2.020s)
+   (Read PhysDB Routing):            (    1.408s)
+ (Read PhysDB Placement):            (   26.906s)
+(Read PhysDB Finalizing):            (    0.400s)
+            (EDIF Parse):            (   35.960s)
+   Read Netlist & PhysDB:    35.963s
+------------------------------------------------------------------------------
+         [No GC] *Total*:    38.942s
+F4_V71_PREPROC makePhys=11.96s staticPins=1.47s missingPins=4.30s
+F4_V67_PREPROC rwPre=17.73s updatePins=1.96s
+F4_V67_UNROUTED count=4952719 time_s=1.17
+INFO: Auto-tuned routing profile by design size (nodes=5767244, connections=4909155, bbox=12/60, initialPresentCongestionFactor=4.0)
+F1_PPT_INITIAL_OCCUPANCY ns=1232559787
+==============================================================================
+==                               Route Design                               ==
+==============================================================================
+F2_PREWARM mode=background rows=4952719 block=128 routerThread=1 cudaThread=23 contextScheduleNs=2392014 contextStartNs=4989659 contextReadyNs=604810920 geometryStartNs=80749311537 hostReadyNs=83693920821 waitStartNs=83693920821 waitEndNs=83693923965 overlapNs=599821261 moduleNs=3234577 uploadNs=37180132 kernelNs=1962400 downloadNs=76505404 freeBytes=33206566912 featureContextClosed=1
+F4_DIRECT_CUDA_DEVICE GPU-4c86a339-05a7-65da-76e1-98f51f23d1f7
+F4_V66_PRE clk=0.00 static=0.20 preEst=0.00 f2=3.49 directPre=0.48
+F4_DIRECT_INPUT featureRows=4952719 cpuSearchBudget=0
+F3_ROUND_POLICY bytes=289282951 tier=huge budget=8000 coldFloorNs=38607847000
+INFO: Routing indirect connections iteratively
+      Max iterations: 100
+      Timing driven: false
+      LUT pin swapping: false
+      Bounding box extension: 12.0 60.0
+      Initial present congestion factor: 4.0
+F4_V66_SORT conns=4909155 time_s=1.43
+INFO: Sorting connections with strategy: HPWL_FIRST (HPWL asc -> fanout desc -> hashCode)
+------------------------------------------------------------------------------
+              Generated       RRG        Routed  Nodes With          Total Run
+Iteration     RRG Nodes  Time (s)   Connections    Overlaps           Time (s)
+---------  ----------------------   -----------  ----------   ----------------
+F4_V67_GATE_OPEN preloaded=true time_s=0.01
+=== FIDES LANE GATE ===
+lane impl: host -> com.xilinx.rapidwright.rwroute.FidesLaneHost (interface com.xilinx.rapidwright.rwroute.FidesLane)
+artifact: /home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v94all13-THEIA_50per/rrg.bin  N=92497168 M=391524527 version=2 sections=18
+manifest: /home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v94all13-THEIA_50per/rrg.manifest.txt  header=16 runs=276420 lines=92497184
+golden  : this run writes null; compared against (none given) lines=(none)  lane's line=1
+guard isVersal      : false (must be false)
+guard lutRoutethru  : false (must be false)
+guard timingDriven  : false (must be false)
+guard useBoundingBox: true
+guard useUTurnNodes : false
+oracle              : OFF (--fidesLaneVerify not given)
+pcc array identity  : lane.table == graph.presentCongestionCosts -> DIFFERENT (the lane was handed the live array, this is the .bin copy)
+pcc live[0..7]      : 0.0 0.0 0.0 0.0 0.0 0.0 0.0 0.0
+pcc artifact[0..7]  : 1.0 5.0 9.0 13.0 17.0 21.0 25.0 29.0
+pcc length          : live=256 artifact=256
+PINFEED materialised: live=4559989 artifact=-1  (not comparable: live counts only what the design load created, the artifact was measured after a forced full expansion -- see the per-expansion oracle line below)
+live rnodes         : 5767244 (numNodes=5767244)
+=== END GATE SETUP ===
+=== FIDES LANE MIRROR (initialised; the lane now reads the flat arrays) ===
+mirror: N=92497168 capacity=1 lines=5767244 unmapped=0  (occupancy sameNetCount historicalCongestionCost)
+FIDES_V67_NATIVE_ATTACH time_s=0.59
+FIDES_NATIVE_CPU ready=true N=92497168 M=391524527
+FIDES_NATIVE_CPU v37 registered=4909155 nets=858089 init_s=4.55
+F4_DIRECT_ROUND_1 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V66_PORTALS portals=1440 time_s=0.02
+F4_MULTI_SLR_CORRIDOR from=1 to=3 boundaries=2 source=109,460 sink=101,729 base=82	400	121	789 tight=95	455	121	736
+...
+=== TAIL ===
+F4_V37_ROUND iter=51 active=1667 routed=63 skip=1604 gpu_ok=0 cpu_ok=63 par=62 ser=1 retries=1 same_ok=0 base_h=11 rel_h=19 fb=0 unrout=0 over=34 excess=34 pops=10862948 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.90
+F4_PPT11_ROUND {"next":"HOLD","previous_excess":45,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":34,"cpu_pops":10862948,"resident_started":false,"attempts":63,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":34,"observed_cpu_tail_pops":[0,0,0],"round":51,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  51                  0      0.00            63          34               0.93
+F4_DIRECT_ROUND_52 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=52 p1_s=0.06 p2_n=6 p2_s=0.20 p3_n=14 p3_s=0.56 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=52 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=52 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=52 gpu_ok=0 wide_ok=0 cpu_ok=71 gpu_pops=0 cpu_pops=5945363 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.83
+F4_V37_ROUND iter=52 active=194 routed=71 skip=123 gpu_ok=0 cpu_ok=71 par=71 ser=0 retries=3 same_ok=17 base_h=6 rel_h=14 fb=0 unrout=0 over=23 excess=23 pops=5945363 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.83
+F4_PPT11_ROUND {"next":"DRAIN","previous_excess":34,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"HOLD","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":23,"cpu_pops":5945363,"resident_started":false,"attempts":71,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":23,"observed_cpu_tail_pops":[0,0,0],"round":52,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  52                  0      0.00            71          23               0.93
+F4_DIRECT_ROUND_53 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=53 p1_s=0.03 p2_n=1 p2_s=0.00 p3_n=7 p3_s=0.62 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=53 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=53 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=53 gpu_ok=0 wide_ok=0 cpu_ok=46 gpu_pops=0 cpu_pops=4567025 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.66
+F4_V37_ROUND iter=53 active=113 routed=46 skip=67 gpu_ok=0 cpu_ok=46 par=43 ser=3 retries=3 same_ok=6 base_h=1 rel_h=7 fb=0 unrout=0 over=13 excess=13 pops=4567025 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.66
+F4_PPT11_ROUND {"next":"DRAIN","previous_excess":23,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"DRAIN","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":13,"cpu_pops":4567025,"resident_started":false,"attempts":46,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":13,"observed_cpu_tail_pops":[0,0,0],"round":53,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  53                  0      0.00            46          13               0.68
+F4_DIRECT_ROUND_54 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=54 p1_s=0.00 p2_n=0 p2_s=0.00 p3_n=44 p3_s=0.62 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=54 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=54 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=54 gpu_ok=0 wide_ok=0 cpu_ok=44 gpu_pops=0 cpu_pops=781723 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.63
+F4_V37_ROUND iter=54 active=44 routed=44 skip=0 gpu_ok=0 cpu_ok=44 par=0 ser=44 retries=0 same_ok=0 base_h=0 rel_h=0 fb=0 unrout=0 over=2 excess=2 pops=781723 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.63
+F4_PPT11_ROUND {"next":"DRAIN","previous_excess":13,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"DRAIN","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":2,"cpu_pops":781723,"resident_started":false,"attempts":44,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":2,"observed_cpu_tail_pops":[0,0,0],"round":54,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  54                  0      0.00            44           2               0.64
+F4_DIRECT_ROUND_55 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=55 p1_s=0.00 p2_n=0 p2_s=0.00 p3_n=38 p3_s=0.19 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=55 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=55 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=55 gpu_ok=0 wide_ok=0 cpu_ok=38 gpu_pops=0 cpu_pops=154500 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.20
+F4_V37_ROUND iter=55 active=6 routed=38 skip=0 gpu_ok=0 cpu_ok=38 par=0 ser=38 retries=0 same_ok=0 base_h=0 rel_h=0 fb=0 unrout=0 over=1 excess=1 pops=154500 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.20
+F4_V68_MICRO_STUCK iter=55 over=1 streak=1 mult=2.5
+F4_PPT11_ROUND {"next":"DRAIN","previous_excess":2,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"DRAIN","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":1,"cpu_pops":154500,"resident_started":false,"attempts":38,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":1,"observed_cpu_tail_pops":[0,0,0],"round":55,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  55                  0      0.00            38           1               0.22
+F4_DIRECT_ROUND_56 offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+F4_V37_PASS iter=56 p1_s=0.00 p2_n=0 p2_s=0.00 p3_n=34 p3_s=0.02 mega_n=0 mega_s=0.00
+F4_V39_HOST iter=56 pick_s=0.00 meta_s=0.00 pack_s=0.00 p4a_s=0.00 p4b_s=0.00 p4c_s=0.00 mega_up=0 mega_pack_s=0.00 mega_gpu_s=0.00
+F4_V41_META iter=56 loop_s=0.00 sort_s=0.00 upw_s=0.00 live_s=0.00 build_s=0.00 dirty_n=0 patch_n=0 w_tot=0 p_tot=0
+F4_V37_GPU_ROUND iter=56 gpu_ok=0 wide_ok=0 cpu_ok=34 gpu_pops=0 cpu_pops=2420 gpu_waves=0 gpu_ov=0 gpu_fb=0 gpu_s=0.00 total_s=0.03
+F4_V37_ROUND iter=56 active=2 routed=34 skip=0 gpu_ok=0 cpu_ok=34 par=0 ser=34 retries=0 same_ok=0 base_h=0 rel_h=0 fb=0 unrout=0 over=0 excess=0 pops=2420 gpu_pops=0 waves=0 corridor_s=0.00 gpu_s=0.00 cpp_s=0.03
+F4_PPT11_ROUND {"next":"CONVERGED","previous_excess":1,"unroutable":0,"realized_members":0,"corridor_searches":0,"spatial_partial_group_ns":0,"estimated_cpu_tail_ns_for_handoffs":[0,0,0],"current":"DRAIN","spatial_commits":0,"setup_ns":38607847000,"cpu_tail_samples_by_service":[0,0,0],"excess":0,"cpu_pops":2420,"resident_started":false,"attempts":34,"dispatch_ns":0,"heavy_by_service":[0,0,0],"gain_ns":-38607847000,"completed_device_widths":[0,0,0,0,0,0,0,0,0],"observed_cpu_tail_ns":[0,0,0],"eligible_pops_by_service":[0,0,0],"budget_stops_by_service":[0,0,0],"spatial_groups":0,"overused_nodes":0,"observed_cpu_tail_pops":[0,0,0],"round":56,"forecast_cpu_tail_ns":0,"original_box_retries":0,"realized_batches_by_width":[0,0,0,0,0,0,0,0,0],"realized_batch_ns":0,"estimated_batches_by_width":[0,0,0,0,0,0,0,0,0],"eligible_by_service":[0,0,0]}
+  56                  0      0.00            34           0               0.05
+------------------------------------------------------------------------------
+V37_MATERIALIZE_VERIFY_OK checked=20
+FIDES_V37_GPU shutdown=true
+FIDES_NATIVE_CPU v37 materialized=4909155 overused=0 seq_fix=0 time_s=13.29 (export=0.83 cache=5.64 bind=3.41 users=3.41)
+F4_DIRECT_CUDA_DEVICE GPU-4c86a339-05a7-65da-76e1-98f51f23d1f7
+F4_GPU_DIRECT_COMMITTED 43564
+F4_V37_ASSIGN_NODES conns=4909155 time_s=1.79
+F4_V37_FIX_ROUTES fixed=117769 parallel=true time_s=5.84
+F4_V66_POST lut=0.00 assign=1.79 fix=5.84 srcPin=1.30
+F4_DIRECT_FINAL offered=0 pathAccepted=0 rejected=0 unsupported=0 missingFeature=0 initialSameSlr=0 initialCrossSlr=0
+FIDES_LANE_BATCH_WITNESS driver=serial batches=0 attempts=0 maxBatch=0 runCalls=0
+FIDES_LANE_CHAIN_WITNESS checked=0 gated_on=1 slot_checked=0 committed=0
+F4_V37_SETPIPS nets=901653 tileTypes=0 trackChanges=false time_s=5.86
+==============================================================================
+==                                Statistics                                ==
+==============================================================================
+Nodes popped:                       28154290315
+Route design:                          625.88s
+├─ Initialization:                      20.59s
+└─ Routing:                            605.30s
+==============================================================================
+FIDES fallbackAttempts=0
+FIDES backtracks calls=0 unexpected=0 silent=0
+FIDES unroutable=0
+F4_V67_UNROUTED count=0 time_s=0.35
+     (Build XDEF Header):            (    2.708s)
+(Write XDEF Cache (3/3)):            (    0.530s)
+(Write XDEF Cache (2/3)):            (    3.383s)
+(Write XDEF Cache (1/3)):            (    0.770s)
+            (Write EDIF):            (    8.069s)
+  (Write XDEF Placement):            (    5.512s)
+    (Write XDEF Routing):            (   13.576s)
+ (Write XDEF Finalizing):            (    0.010s)
+            (Write XDEF):            (   14.009s)
+       Write EDIF & XDEF:    14.330s
+               Write XDC:     0.677s
+------------------------------------------------------------------------------
+         [No GC] *Total*:    15.007s
+F4_V37_STATS_WL nets=901653 time_s=3.79
+Total wirelength:                     19067589
+F4_V66_INPROC_DCP_CHECK pins=2.52s overlap_wall=18.86s write_s=15.07s check_s=1.98s stats_s=3.79s
+F4_BASE_DCP unroutedPins=0 sharedPipNodes=0 pips=31080646
+
+INFO: Wrote routed design
+ /home/yxwang1/FIDES/aquarius-evidence-2026-10-22/ppt-reproduction-2026-11-07/f4-ppt-runtime-measurement-v1/v94all13-THEIA_50per/THEIA_50per_gpu_full.dcp

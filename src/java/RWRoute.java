@@ -3063,56 +3063,56 @@ public class RWRoute {
             System.arraycopy(v27NextActive, 0, activeIdx, 0, activeCount);
         }
 
-        final int[] bx0 = new int[activeCount];
-        final int[] by0 = new int[activeCount];
-        final int[] bx1 = new int[activeCount];
-        final int[] by1 = new int[activeCount];
-        final byte[] buse = new byte[activeCount];
-
         long prepStarted = System.nanoTime();
-        if (config.isUseBoundingBox()) {
+        if (routeIteration == 1 && config.isUseBoundingBox() && f4Corridor != null) {
             gate.ensureF4PortalsIndexed();
-            final List<Connection> activeList = (activeCount == nAll) ? all : new ArrayList<>(activeCount);
-            if (activeCount != nAll) {
-                for (int k = 0; k < activeCount; ++k) activeList.add(all.get(activeIdx[k]));
-            }
-            final F1Corridor.ParallelEntry[] entries = new F1Corridor.ParallelEntry[activeCount];
-            final int workers = Math.max(1, f4SharedPool.getParallelism());
-            if (workers >= 2 && activeCount >= 4096) {
-                int chunk = Math.max(2048, (activeCount + workers * 4 - 1) / (workers * 4));
-                var jobs = new ArrayList<java.util.concurrent.CompletableFuture<Void>>();
-                for (int from = 0; from < activeCount; from += chunk) {
-                    final int f = from, t = Math.min(activeCount, from + chunk);
-                    jobs.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
-                        for (int k = f; k < t; ++k) {
-                            Connection c = activeList.get(k);
-                            F1Corridor.Box b = gate.f4BoundaryParallel(c, entries, k);
-                            if (b != null) {
-                                bx0[k] = b.left;
-                                by0[k] = b.bottom;
-                                bx1[k] = b.right;
-                                by1[k] = b.top;
-                                buse[k] = 1;
+            gate.f4NativeInitCorridors(f4Corridor);
+            final int[] crossIdx = gate.f4CrossSlrIndices();
+            if (f4Corridor.isCrossSlrCorridorEnabled() && crossIdx != null && crossIdx.length > 0) {
+                final int cn = crossIdx.length;
+                final List<Connection> crossList = new ArrayList<>(cn);
+                for (int idx : crossIdx) crossList.add(all.get(idx));
+                final F1Corridor.ParallelEntry[] entries = new F1Corridor.ParallelEntry[cn];
+                final int[] cbx0 = new int[cn];
+                final int[] cby0 = new int[cn];
+                final int[] cbx1 = new int[cn];
+                final int[] cby1 = new int[cn];
+                final byte[] cbuse = new byte[cn];
+                final int workers = Math.max(1, f4SharedPool.getParallelism());
+                if (workers >= 2 && cn >= 2048) {
+                    int chunk = Math.max(1024, (cn + workers * 4 - 1) / (workers * 4));
+                    var jobs = new ArrayList<java.util.concurrent.CompletableFuture<Void>>();
+                    for (int from = 0; from < cn; from += chunk) {
+                        final int f = from, t = Math.min(cn, from + chunk);
+                        jobs.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                            for (int k = f; k < t; ++k) {
+                                F1Corridor.Box b = gate.f4BoundaryParallel(crossList.get(k), entries, k);
+                                if (b != null) {
+                                    cbx0[k] = b.left;
+                                    cby0[k] = b.bottom;
+                                    cbx1[k] = b.right;
+                                    cby1[k] = b.top;
+                                    cbuse[k] = 1;
+                                }
                             }
+                        }, f4SharedPool));
+                    }
+                    java.util.concurrent.CompletableFuture.allOf(
+                            jobs.toArray(new java.util.concurrent.CompletableFuture<?>[0])).join();
+                } else {
+                    for (int k = 0; k < cn; ++k) {
+                        F1Corridor.Box b = gate.f4BoundaryParallel(crossList.get(k), entries, k);
+                        if (b != null) {
+                            cbx0[k] = b.left;
+                            cby0[k] = b.bottom;
+                            cbx1[k] = b.right;
+                            cby1[k] = b.top;
+                            cbuse[k] = 1;
                         }
-                    }, f4SharedPool));
-                }
-                java.util.concurrent.CompletableFuture.allOf(
-                        jobs.toArray(new java.util.concurrent.CompletableFuture<?>[0])).join();
-            } else {
-                for (int k = 0; k < activeCount; ++k) {
-                    Connection c = activeList.get(k);
-                    F1Corridor.Box b = gate.f4BoundaryParallel(c, entries, k);
-                    if (b != null) {
-                        bx0[k] = b.left;
-                        by0[k] = b.bottom;
-                        bx1[k] = b.right;
-                        by1[k] = b.top;
-                        buse[k] = 1;
                     }
                 }
+                gate.f4NativeSeedCrossSlrCorridors(crossIdx, cn, cbx0, cby0, cbx1, cby1, cbuse);
             }
-            gate.commitF4BoundaryParallel(activeList, entries);
         }
         double corridorSec = (System.nanoTime() - prepStarted) / 1e9;
 
@@ -3124,7 +3124,7 @@ public class RWRoute {
         final int threads = Math.max(1, f4SharedPool.getParallelism() + 1);
         final long[] stats = new long[18];
 
-        gate.f4NativeRouteRound(routeIteration, activeIdx, activeCount, bx0, by0, bx1, by1, buse,
+        gate.f4NativeRouteRound(routeIteration, activeIdx, activeCount, null, null, null, null, null,
                 shareWeight, rnodeCostWeight, rnodeWLWeight, estWlWeight,
                 65536, threads, stats);
 
@@ -3555,7 +3555,7 @@ public class RWRoute {
              * Note this is a SECOND trigger point: --fidesLaneAttempt still decides which connection
              * the lane searches, but the mirror is maintained for the whole run either way. */
             getFidesLaneGate().mirrorInit();
-            getFidesLaneGate().f4NativeInit(System.getProperty("fides.ppt.f4.work"), routingGraph, config);
+            getFidesLaneGate().f4NativeInit(System.getProperty("fides.ppt.f4.work"), routingGraph, config, sortedIndirectConnections.size());
             v27RoundActive = getFidesLaneGate().f4NativeRegisterAll(sortedIndirectConnections, config);
         }
         long lastIterationRnodeCount = routingGraph.numNodes();
@@ -3738,80 +3738,106 @@ public class RWRoute {
         }
         long tFix1 = System.nanoTime();
 
-        // Unset the routed state of all source pins (avoid Arrays.asList churn across 901k nets / 4.9M conns)
+        // Unset/set source pin routed states in parallel across SiteInst-disjoint shards, deferring rare pin removals sequentially.
+        final int SP_SHARDS = 64;
+        @SuppressWarnings("unchecked")
+        final java.util.ArrayList<Map.Entry<Net, NetWrapper>>[] spShards = new java.util.ArrayList[SP_SHARDS];
+        for (int s = 0; s < SP_SHARDS; ++s) spShards[s] = new java.util.ArrayList<>(Math.max(16, nets.size() / SP_SHARDS + 16));
         for (Map.Entry<Net, NetWrapper> e : nets.entrySet()) {
-            Net net = e.getKey();
-            SitePinInst source = net.getSource();
-            SitePinInst altSource = net.getAlternateSource();
-            SiteInst si = source.getSiteInst();
-            boolean altSourcePreviouslyRouted = altSource != null && altSource.isRouted();
-            assert(source != null);
-            boolean sourcePreviouslyRouted = source.isRouted();
-            source.setRouted(false);
-            assert(source.getSiteInst() == si);
-            if (altSource != null) {
-                altSource.setRouted(false);
-                assert(altSource.getSiteInst() == si);
-            }
-            Node srcConnNode = source.getConnectedNode();
-            Node altConnNode = (altSource != null) ? altSource.getConnectedNode() : null;
+            SitePinInst src0 = e.getKey().getSource();
+            int s = (src0 != null ? System.identityHashCode(src0.getSiteInst()) : System.identityHashCode(e.getKey())) & (SP_SHARDS - 1);
+            spShards[s].add(e);
+        }
+        @SuppressWarnings("unchecked")
+        final java.util.ArrayList<Object[]>[] deferredPins = new java.util.ArrayList[SP_SHARDS];
+        var spJobs = new java.util.ArrayList<java.util.concurrent.CompletableFuture<Void>>(SP_SHARDS);
+        for (int siIdx = 0; siIdx < SP_SHARDS; ++siIdx) {
+            final int s = siIdx;
+            spJobs.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                java.util.ArrayList<Object[]> def = null;
+                for (Map.Entry<Net, NetWrapper> e : spShards[s]) {
+                    Net net = e.getKey();
+                    SitePinInst source = net.getSource();
+                    SitePinInst altSource = net.getAlternateSource();
+                    SiteInst si = source.getSiteInst();
+                    boolean altSourcePreviouslyRouted = altSource != null && altSource.isRouted();
+                    assert(source != null);
+                    boolean sourcePreviouslyRouted = source.isRouted();
+                    source.setRouted(false);
+                    assert(source.getSiteInst() == si);
+                    if (altSource != null) {
+                        altSource.setRouted(false);
+                        assert(altSource.getSiteInst() == si);
+                    }
+                    Node srcConnNode = source.getConnectedNode();
+                    Node altConnNode = (altSource != null) ? altSource.getConnectedNode() : null;
 
-            // Set the routed state on those source pins that were actually used
-            NetWrapper netWrapper = e.getValue();
-            for (Connection connection : netWrapper.getConnections()) {
-                List<Node> nodes = connection.getNodes();
-                if (nodes == null || nodes.isEmpty()) {
-                    continue;
-                }
+                    NetWrapper netWrapper = e.getValue();
+                    for (Connection connection : netWrapper.getConnections()) {
+                        List<Node> nodes = connection.getNodes();
+                        if (nodes == null || nodes.isEmpty()) {
+                            continue;
+                        }
+                        Node sourceNode = nodes.get(nodes.size() - 1);
+                        SitePinInst usedSpi = null;
+                        if (sourceNode.equals(srcConnNode)) {
+                            usedSpi = source;
+                        }
+                        if (altConnNode != null && sourceNode.equals(altConnNode)) {
+                            usedSpi = altSource;
+                        }
+                        if (usedSpi == null) {
+                            throw new RuntimeException("ERROR: Unknown source node " + sourceNode + " on net " + net.getName());
+                        }
+                        usedSpi.setRouted(true);
+                        if (si.getSitePinInst(usedSpi.getName()) == null) {
+                            si.addPin(usedSpi);
+                        }
+                        if (source.isRouted() && (altSource == null || altSource.isRouted())) {
+                            break;
+                        }
+                    }
 
-                Node sourceNode = nodes.get(nodes.size() - 1);
-                SitePinInst usedSpi = null;
-                if (sourceNode.equals(srcConnNode)) {
-                    usedSpi = source;
+                    if ((altSource != null && altSourcePreviouslyRouted && !altSource.isRouted())
+                            || (sourcePreviouslyRouted && !source.isRouted())) {
+                        if (def == null) def = new java.util.ArrayList<>();
+                        def.add(new Object[]{net, source, altSource, si, altSourcePreviouslyRouted, sourcePreviouslyRouted});
+                    }
                 }
-                if (altConnNode != null && sourceNode.equals(altConnNode)) {
-                    usedSpi = altSource;
+                deferredPins[s] = def;
+            }, f4SharedPool));
+        }
+        java.util.concurrent.CompletableFuture.allOf(spJobs.toArray(new java.util.concurrent.CompletableFuture<?>[0])).join();
+        for (int s = 0; s < SP_SHARDS; ++s) {
+            java.util.ArrayList<Object[]> def = deferredPins[s];
+            if (def == null) continue;
+            for (Object[] rec : def) {
+                Net net = (Net) rec[0];
+                SitePinInst source = (SitePinInst) rec[1];
+                SitePinInst altSource = (SitePinInst) rec[2];
+                SiteInst si = (SiteInst) rec[3];
+                boolean altSourcePreviouslyRouted = (Boolean) rec[4];
+                boolean sourcePreviouslyRouted = (Boolean) rec[5];
+                if (altSource != null && altSourcePreviouslyRouted && !altSource.isRouted()) {
+                    assert(source.isRouted());
+                    altSource.getSiteInst().removePin(altSource);
+                    net.removePin(altSource, true);
+                    assert(source.isRouted());
+                    if (source.getName().endsWith("MUX")) {
+                        assert(altSource.getName().endsWith("_O"));
+                        si.routeIntraSiteNet(net, altSource.getBELPin(), altSource.getBELPin());
+                    }
                 }
-                if (usedSpi == null) {
-                    throw new RuntimeException("ERROR: Unknown source node " + sourceNode + " on net " + net.getName());
-                }
-
-                usedSpi.setRouted(true);
-                if (si.getSitePinInst(usedSpi.getName()) == null) {
-                    si.addPin(usedSpi);
-                }
-
-                if (source.isRouted() && (altSource == null || altSource.isRouted())) {
-                    break;
-                }
-            }
-
-            // If the alt source was previously routed, and is no longer, let's remove it
-            if (altSource != null && altSourcePreviouslyRouted && !altSource.isRouted()) {
-                // If altSource is not routed, then source must be routed
-                assert(source.isRouted());
-                altSource.getSiteInst().removePin(altSource);
-                net.removePin(altSource, true);
-                assert(source.isRouted());
-                if (source.getName().endsWith("MUX")) {
-                    assert(altSource.getName().endsWith("_O"));
-                    // Add site routing back if we are keeping the MUX pin
-                    si.routeIntraSiteNet(net, altSource.getBELPin(), altSource.getBELPin());
-                }
-            }
-            // If the original source was routed and is now no longer used, it must
-            // mean that the alternate source is used instead. Let's remove the main
-            // source which will promote the alternate to main.
-            if (sourcePreviouslyRouted && !source.isRouted()) {
-                assert(altSource != null && altSource.isRouted());
-                net.removePin(source, true);
-                assert(net.getSource() == altSource);
-                assert(net.getAlternateSource() == null);
-                assert(altSource.isRouted());
-                if (source.getName().endsWith("_O")) {
-                    assert(altSource.getName().endsWith("MUX"));
-                    // Add site routing back if we are keeping the MUX pin
-                    si.routeIntraSiteNet(net, source.getBELPin(), source.getBELPin());
+                if (sourcePreviouslyRouted && !source.isRouted()) {
+                    assert(altSource != null && altSource.isRouted());
+                    net.removePin(source, true);
+                    assert(net.getSource() == altSource);
+                    assert(net.getAlternateSource() == null);
+                    assert(altSource.isRouted());
+                    if (source.getName().endsWith("_O")) {
+                        assert(altSource.getName().endsWith("MUX"));
+                        si.routeIntraSiteNet(net, source.getBELPin(), source.getBELPin());
+                    }
                 }
             }
         }
@@ -4333,6 +4359,237 @@ public class RWRoute {
     /**
      * Fixes routes of nets with routing path cycles and multi-driver nodes.
      */
+    private static final class F4FastRouteFixer {
+        private int mapCap = 512;
+        private int mapMask = 511;
+        private long[] mapKeys = new long[512];
+        private int[] mapGen = new int[512];
+        private int[] mapVid = new int[512];
+        private int gen = 1;
+
+        private int vCap = 256;
+        private int vCount = 0;
+        private com.xilinx.rapidwright.device.Node[] vNode = new com.xilinx.rapidwright.device.Node[256];
+        private float[] vDelay = new float[256];
+        private float[] vCost = new float[256];
+        private float[] vPrevDriverCost = new float[256];
+        private int[] vPrev = new int[256];
+        private int[] vVisited = new int[256];
+        private int[] vHead = new int[256];
+        private boolean[] vIsLong = new boolean[256];
+        private boolean[] vIsSource = new boolean[256];
+        private int[] sources = new int[32];
+        private int sourceCount = 0;
+
+        private int eCap = 512;
+        private int eCount = 0;
+        private int[] eTo = new int[512];
+        private int[] eNext = new int[512];
+
+        private int[] pq = new int[256];
+        private int pqSize = 0;
+
+        private static long nodeKey(com.xilinx.rapidwright.device.Node node) {
+            return ((long) node.getTile().getUniqueAddress() << 32) | Integer.toUnsignedLong(node.getWireIndex());
+        }
+
+        private static int mix64(long z) {
+            z = (z ^ (z >>> 30)) * 0xbf58476d1ce4e5b9L;
+            z = (z ^ (z >>> 27)) * 0x94d049bb133111ebL;
+            return (int) (z ^ (z >>> 31));
+        }
+
+        private void growMap() {
+            int newCap = mapCap * 2;
+            long[] nk = new long[newCap];
+            int[] ng = new int[newCap];
+            int[] nv = new int[newCap];
+            int nMask = newCap - 1;
+            int g = gen;
+            for (int i = 0; i < mapCap; ++i) {
+                if (mapGen[i] == g) {
+                    long key = mapKeys[i];
+                    int slot = mix64(key) & nMask;
+                    while (ng[slot] == g) slot = (slot + 1) & nMask;
+                    nk[slot] = key;
+                    ng[slot] = g;
+                    nv[slot] = mapVid[i];
+                }
+            }
+            mapCap = newCap;
+            mapMask = nMask;
+            mapKeys = nk;
+            mapGen = ng;
+            mapVid = nv;
+        }
+
+        private int getOrInsert(com.xilinx.rapidwright.device.Node node, RouteNodeGraph graph) {
+            if (vCount * 2 >= mapCap) growMap();
+            long key = nodeKey(node);
+            int slot = mix64(key) & mapMask;
+            int g = gen;
+            while (mapGen[slot] == g) {
+                if (mapKeys[slot] == key) return mapVid[slot];
+                slot = (slot + 1) & mapMask;
+            }
+            int vid = vCount++;
+            if (vid == vCap) {
+                int nc = vCap * 2;
+                vNode = java.util.Arrays.copyOf(vNode, nc);
+                vDelay = java.util.Arrays.copyOf(vDelay, nc);
+                vCost = java.util.Arrays.copyOf(vCost, nc);
+                vPrevDriverCost = java.util.Arrays.copyOf(vPrevDriverCost, nc);
+                vPrev = java.util.Arrays.copyOf(vPrev, nc);
+                vVisited = java.util.Arrays.copyOf(vVisited, nc);
+                vHead = java.util.Arrays.copyOf(vHead, nc);
+                vIsLong = java.util.Arrays.copyOf(vIsLong, nc);
+                vIsSource = java.util.Arrays.copyOf(vIsSource, nc);
+                if (pq.length < nc * 2) pq = new int[nc * 2];
+                vCap = nc;
+            }
+            mapKeys[slot] = key;
+            mapGen[slot] = g;
+            mapVid[slot] = vid;
+            vNode[vid] = node;
+            RouteNode rn = graph.getNode(node);
+            vDelay[vid] = rn == null ? 0f : rn.getDelay();
+            vCost[vid] = Short.MAX_VALUE;
+            vPrevDriverCost[vid] = Float.MAX_VALUE;
+            vPrev[vid] = -1;
+            vVisited[vid] = 0;
+            vHead[vid] = -1;
+            vIsLong[vid] = com.xilinx.rapidwright.timing.delayestimator.DelayEstimatorBase.isLong(node);
+            vIsSource[vid] = false;
+            return vid;
+        }
+
+        private int lookupExisting(com.xilinx.rapidwright.device.Node node) {
+            long key = nodeKey(node);
+            int slot = mix64(key) & mapMask;
+            int g = gen;
+            while (mapGen[slot] == g) {
+                if (mapKeys[slot] == key) return mapVid[slot];
+                slot = (slot + 1) & mapMask;
+            }
+            return -1;
+        }
+
+        private void addEdge(int u, int v) {
+            for (int e = vHead[u]; e != -1; e = eNext[e]) {
+                if (eTo[e] == v) return;
+            }
+            int e = eCount++;
+            if (e == eCap) {
+                int nc = eCap * 2;
+                eTo = java.util.Arrays.copyOf(eTo, nc);
+                eNext = java.util.Arrays.copyOf(eNext, nc);
+                eCap = nc;
+            }
+            eTo[e] = v;
+            eNext[e] = vHead[u];
+            vHead[u] = e;
+        }
+
+        private void pqPush(int vid) {
+            if (pqSize == pq.length) pq = java.util.Arrays.copyOf(pq, pq.length * 2);
+            int idx = pqSize++;
+            float d = vDelay[vid];
+            while (idx > 0) {
+                int parent = (idx - 1) >>> 1;
+                int pVid = pq[parent];
+                if (Float.compare(vDelay[pVid], d) <= 0) break;
+                pq[idx] = pVid;
+                idx = parent;
+            }
+            pq[idx] = vid;
+        }
+
+        private int pqPop() {
+            int top = pq[0];
+            int last = pq[--pqSize];
+            if (pqSize > 0) {
+                int idx = 0;
+                float dLast = vDelay[last];
+                while (true) {
+                    int child = (idx << 1) + 1;
+                    if (child >= pqSize) break;
+                    int right = child + 1;
+                    if (right < pqSize && Float.compare(vDelay[pq[right]], vDelay[pq[child]]) < 0) {
+                        child = right;
+                    }
+                    if (Float.compare(dLast, vDelay[pq[child]]) <= 0) break;
+                    pq[idx] = pq[child];
+                    idx = child;
+                }
+                pq[idx] = last;
+            }
+            return top;
+        }
+
+        void fix(NetWrapper netWrapper, RouteNodeGraph graph) {
+            if (++gen == 0) {
+                java.util.Arrays.fill(mapGen, 0);
+                gen = 1;
+            }
+            vCount = 0;
+            eCount = 0;
+            sourceCount = 0;
+            pqSize = 0;
+            int g = gen;
+
+            for (Connection connection : netWrapper.getConnections()) {
+                List<com.xilinx.rapidwright.device.Node> nodes = connection.getNodes();
+                int vertexSize = nodes.size();
+                for (int i = vertexSize - 1; i > 0; --i) {
+                    int cur = getOrInsert(nodes.get(i), graph);
+                    int next = getOrInsert(nodes.get(i - 1), graph);
+                    if (i == vertexSize - 1 && !vIsSource[cur]) {
+                        vIsSource[cur] = true;
+                        if (sourceCount == sources.length) sources = java.util.Arrays.copyOf(sources, sources.length * 2);
+                        sources[sourceCount++] = cur;
+                    }
+                    addEdge(cur, next);
+                }
+            }
+            for (int i = 0; i < sourceCount; ++i) {
+                int src = sources[i];
+                vCost[src] = vDelay[src];
+                vPrev[src] = -1;
+                pqPush(src);
+            }
+            while (pqSize > 0) {
+                int cur = pqPop();
+                float curCost = vCost[cur];
+                boolean curIsLong = vIsLong[cur];
+                for (int e = vHead[cur]; e != -1; e = eNext[e]) {
+                    int nxt = eTo[e];
+                    float newCost = curCost + vDelay[nxt]
+                            + com.xilinx.rapidwright.timing.delayestimator.DelayEstimatorBase.getExtraDelay(vNode[nxt], curIsLong);
+                    if (vVisited[nxt] != g || newCost < vCost[nxt]) {
+                        vCost[nxt] = newCost;
+                        if (vPrev[nxt] < 0 || curCost < vPrevDriverCost[nxt]) {
+                            vPrev[nxt] = cur;
+                            vPrevDriverCost[nxt] = curCost;
+                        }
+                        vVisited[nxt] = g;
+                        pqPush(nxt);
+                    }
+                }
+            }
+            for (Connection connection : netWrapper.getConnections()) {
+                List<com.xilinx.rapidwright.device.Node> nodes = connection.getNodes();
+                if (nodes.isEmpty()) continue;
+                int vid = lookupExisting(nodes.get(0));
+                if (vid < 0) continue;
+                nodes.clear();
+                while (vid >= 0) {
+                    nodes.add(vNode[vid]);
+                    vid = vPrev[vid];
+                }
+            }
+        }
+    }
+
     private void v37RipUpNoJournal(Connection connection) {
         List<RouteNode> rnodes = connection.getRnodes();
         if (rnodes.isEmpty()) return;
@@ -4365,17 +4622,19 @@ public class RWRoute {
             final int total = fixedRoutes.size();
             final int workers = Math.max(1, f4SharedPool.getParallelism());
             final int chunk = Math.max(256, (total + workers * 4 - 1) / (workers * 4));
+            final ThreadLocal<F4FastRouteFixer> fastFixer = ThreadLocal.withInitial(F4FastRouteFixer::new);
             var jobs = new java.util.ArrayList<java.util.concurrent.CompletableFuture<Void>>();
             for (int from = 0; from < total; from += chunk) {
                 final int f = from;
                 final int t = Math.min(total, from + chunk);
                 jobs.add(java.util.concurrent.CompletableFuture.runAsync(() -> {
+                    final F4FastRouteFixer fixer = fastFixer.get();
                     for (int i = f; i < t; ++i) {
                         NetWrapper nw = fixedRoutes.get(i);
                         for (Connection connection : nw.getConnections()) {
                             if (!connection.isDirect()) v37RipUpNoJournal(connection);
                         }
-                        new RouteFixer(nw, routingGraph).finalizeRoutesOfConnections();
+                        fixer.fix(nw, routingGraph);
                     }
                 }, f4SharedPool));
             }
@@ -4525,7 +4784,7 @@ public class RWRoute {
                     NetWrapper netWrapper = netList.get(i);
                     Net net = netWrapper.getNet();
                     assert(net.getType() == NetType.WIRE && !NetTools.isGlobalClock(net));
-                    Set<PIP> newPIPs = new HashSet<>();
+                    Set<PIP> newPIPs = new HashSet<>(Math.max(16, netWrapper.getConnections().size() * 4));
                     for (PIP pip : net.getPIPs()) {
                         if (pip.isPIPFixed()) {
                             newPIPs.add(pip);
@@ -4534,11 +4793,14 @@ public class RWRoute {
                     for (Connection connection : netWrapper.getConnections()) {
                         List<Node> connNodes = connection.getNodes();
                         List<PIP> pips = RouterHelper.getConnectionPIPs(connection);
-                        if (connNodes != null && connNodes.size() > 1 && pips.size() != connNodes.size() - 1) {
+                        int pn = pips.size();
+                        if (connNodes != null && connNodes.size() > 1 && pn != connNodes.size() - 1) {
                             throw new IllegalStateException("V32 setPIPsOfNets Null PIP detected on net="
-                                    + net.getName() + " expected=" + (connNodes.size() - 1) + " got=" + pips.size());
+                                    + net.getName() + " expected=" + (connNodes.size() - 1) + " got=" + pn);
                         }
-                        newPIPs.addAll(pips);
+                        for (int pi = 0; pi < pn; ++pi) {
+                            newPIPs.add(pips.get(pi));
+                        }
                     }
                     SitePinInst source = net.getSource();
                     SitePinInst altSource = net.getAlternateSource();

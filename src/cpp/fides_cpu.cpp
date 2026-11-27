@@ -13,11 +13,18 @@
 #include <functional>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <queue>
 #include <string>
 #include <thread>
+#include <type_traits>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 #ifdef __linux__
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
 #include <sys/syscall.h>
 #include <unistd.h>
 #endif
@@ -28,6 +35,76 @@
 #else
 #define FIDES_PAUSE() ((void)0)
 #endif
+
+template <typename T>
+struct HugeBuf {
+    static_assert(std::is_trivially_copyable_v<T>, "HugeBuf requires trivial POD");
+    T* ptr = nullptr;
+    size_t count = 0;
+    size_t capBytes = 0;
+
+    HugeBuf() = default;
+    HugeBuf(const HugeBuf&) = delete;
+    HugeBuf& operator=(const HugeBuf&) = delete;
+    ~HugeBuf() { release(); }
+
+    void release() {
+#ifdef __linux__
+        if (ptr != nullptr && capBytes > 0) munmap(ptr, capBytes);
+#else
+        std::free(ptr);
+#endif
+        ptr = nullptr;
+        count = 0;
+        capBytes = 0;
+    }
+
+    void swap(HugeBuf<T>& other) noexcept {
+        std::swap(ptr, other.ptr);
+        std::swap(count, other.count);
+        std::swap(capBytes, other.capBytes);
+    }
+
+    // Allocates virtual memory without eager single-threaded zero-fill so parallel workers fault pages with THP.
+    void resizeNoInit(size_t n) {
+        if (n == count && ptr != nullptr) return;
+        size_t needBytes = n * sizeof(T);
+        if (needBytes == 0) {
+            release();
+            return;
+        }
+        if (needBytes > capBytes) {
+            release();
+#ifdef __linux__
+            constexpr size_t kHugeAlign = (2ULL << 20);
+            size_t mapBytes = (needBytes + kHugeAlign - 1ULL) & ~(kHugeAlign - 1ULL);
+            void* p = mmap(nullptr, mapBytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+            if (p == MAP_FAILED) throw std::bad_alloc();
+#ifdef MADV_HUGEPAGE
+            (void) madvise(p, mapBytes, MADV_HUGEPAGE);
+#endif
+            ptr = static_cast<T*>(p);
+            capBytes = mapBytes;
+#else
+            ptr = static_cast<T*>(std::malloc(needBytes));
+            if (!ptr) throw std::bad_alloc();
+            capBytes = needBytes;
+#endif
+        }
+        count = n;
+    }
+
+    T* data() { return ptr; }
+    const T* data() const { return ptr; }
+    size_t size() const { return count; }
+    bool empty() const { return count == 0; }
+    T* begin() { return ptr; }
+    const T* begin() const { return ptr; }
+    T* end() { return ptr + count; }
+    const T* end() const { return ptr + count; }
+    T& operator[](size_t i) { return ptr[i]; }
+    const T& operator[](size_t i) const { return ptr[i]; }
+};
 
 namespace {
 
@@ -213,12 +290,6 @@ struct alignas(8) NodeGeomCold {
 };
 static_assert(sizeof(NodeGeomCold) == 8, "NodeGeomCold must be 8 bytes");
 
-struct DynNode {
-    I32 occ;
-    float hist;
-};
-static_assert(sizeof(DynNode) == sizeof(FidesGpuDynNode), "DynNode must match FidesGpuDynNode");
-
 struct ConnData {
     U32 netId;
     U32 src;
@@ -241,11 +312,13 @@ struct ConnData {
 struct GraphData {
     U32 n = 0;
     U32 m = 0;
-    std::vector<U32> offset;
-    std::vector<U32> edge;
-    std::vector<NodeGeomHot> geomHot;
-    std::vector<NodeGeomCold> geomCold;
-    std::vector<DynNode> dyn;
+    HugeBuf<U32> offset;
+    HugeBuf<U32> edge;
+    HugeBuf<uint8_t> coreDeg;
+    HugeBuf<NodeGeomHot> geomHot;
+    HugeBuf<NodeGeomCold> geomCold;
+    HugeBuf<I32> occ;
+    HugeBuf<float> hist;
 
     std::vector<U32> ord;
     std::vector<U32> typeFlags;
@@ -256,11 +329,11 @@ struct GraphData {
     I32 sllLen = 0;
 
     std::vector<float> pcc;
-    std::vector<I32> overusedPos;
+    HugeBuf<I32> overusedPos;
     std::vector<U32> overusedList;
-    std::vector<U32> lastCommitSeq;
-    std::vector<U32> lastCommitNet;
-    std::vector<U32> prevOtherSeq;
+    HugeBuf<U32> lastCommitSeq;
+    HugeBuf<U32> lastCommitNet;
+    HugeBuf<U32> prevOtherSeq;
     U32 commitSeq = 1;
 
     std::vector<NetScopeData> netScopes;
@@ -271,20 +344,41 @@ struct GraphData {
     std::vector<uint8_t> consecCongested;
     std::vector<uint8_t> connWiden;
     std::vector<uint8_t> tailFailStreak;
+    std::vector<uint8_t> gpuOverflowed;
+    std::vector<I32> corrBx0;
+    std::vector<I32> corrBy0;
+    std::vector<I32> corrBx1;
+    std::vector<I32> corrBy1;
+    std::vector<uint8_t> corrBuse;
+    std::vector<uint8_t> corrMode;
+    bool corrInit = false;
     bool ready = false;
+
+    struct SnapEntry { U32 node; U32 conn; };
+    static constexpr U32 SNAP_BUCKETS = 1u << 22;
+    bool snapReady = false;
+    std::vector<U32> snapOffsets;
+    std::vector<SnapEntry> snapEntries;
+    std::vector<uint8_t> snapDirtyFlag;
+    std::vector<U32> snapDirtyList;
+    std::vector<U32> snapCandStamp;
+    U32 snapCandEpoch = 1u;
+    std::vector<I32> lastRoundActive;
+    std::vector<uint8_t> activeStreakFlag;
+    std::vector<U32> activeStreakList;
 
     // v40 multi-GPU (1..4 x V100) CUDA dual-engine state & sync buffers
     bool gpuEnabled = false;
     int gpuCount = 0;
     FidesGpuMultiInitInfo gpuMulti{};
-    std::vector<U32> gpuDirtyOccStamp;
+    HugeBuf<U32> gpuDirtyOccStamp;
     U32 gpuDirtyOccEpoch = 1;
     std::vector<U32> gpuDirtyOccIds;
     std::vector<I32> gpuDirtyOccVals;
-    std::vector<U32> waveOverusedStamp;
-    std::vector<I32> waveOvClaimRem;
+    HugeBuf<U32> waveOverusedStamp;
+    HugeBuf<I32> waveOvClaimRem;
     U32 waveOverusedEpoch = 1;
-    std::vector<U64> waveCommitKey;
+    HugeBuf<U64> waveCommitKey;
     U32 waveCommitEpoch = 1;
     U32 gpuStampWaveEpoch = 0;
     I64 lastTailFbCount = 0;
@@ -295,6 +389,9 @@ struct GraphData {
 };
 
 static GraphData G;
+static U32 s_ord[OrdinalCount]{};
+static const float* s_pccPtr = nullptr;
+static int s_pccLen = 0;
 
 constexpr U32 PAGE_SHIFT = 12;
 constexpr U32 PAGE_SIZE = 1u << PAGE_SHIFT;
@@ -535,7 +632,7 @@ inline int slrFast(U32 id, const NodeGeomHot& cg, const NodeGeomHot* pg) {
 }
 
 inline int getUsage(U32 id, int& sameUses) {
-    I32 rawOcc = __atomic_load_n(&G.dyn[id].occ, __ATOMIC_ACQUIRE);
+    I32 rawOcc = __atomic_load_n(&G.occ[id], __ATOMIC_ACQUIRE);
     if (rawOcc <= 0) {
         sameUses = 0;
         return rawOcc;
@@ -546,7 +643,7 @@ inline int getUsage(U32 id, int& sameUses) {
                 for (int i = 0; i < S.tinyCount; ++i) {
                     if (S.tinyOv[i].id == id) {
                         sameUses = S.tinyOv[i].same;
-                        I32 ovOcc = __atomic_load_n(&G.dyn[id].occ, __ATOMIC_ACQUIRE) + S.tinyOv[i].occDelta;
+                        I32 ovOcc = __atomic_load_n(&G.occ[id], __ATOMIC_ACQUIRE) + S.tinyOv[i].occDelta;
                         if (ovOcc <= 0 && S.baseScope != nullptr) {
                             sameUses = 0;
                         }
@@ -558,7 +655,7 @@ inline int getUsage(U32 id, int& sameUses) {
             const OverrideSlot* ov = S.findOv(id);
             if (ov) {
                 sameUses = ov->same;
-                I32 ovOcc = __atomic_load_n(&G.dyn[id].occ, __ATOMIC_ACQUIRE) + ov->occDelta;
+                I32 ovOcc = __atomic_load_n(&G.occ[id], __ATOMIC_ACQUIRE) + ov->occDelta;
                 if (ovOcc <= 0 && S.baseScope != nullptr) {
                     sameUses = 0;
                 }
@@ -573,7 +670,7 @@ inline int getUsage(U32 id, int& sameUses) {
         }
         // Read baseScope first, then occ (paired with addToScope: increment occ before key, clear count before decrement occ).
         sameUses = S.baseScope->findFlatConcurrent(id);
-        I32 occVal = __atomic_load_n(&G.dyn[id].occ, __ATOMIC_ACQUIRE);
+        I32 occVal = __atomic_load_n(&G.occ[id], __ATOMIC_ACQUIRE);
         if (occVal <= 0) {
             sameUses = 0;
         }
@@ -595,7 +692,9 @@ struct SearchQuery {
     int xmin, ymin, xmax, ymax;
     int origXmin, origXmax;
     bool useBox, uturn, cross, north, south;
+    uint8_t sinkDirKind; // 0=EX_EAST, 1=EX_WEST, 2=EX_BOTH, 3=EX_NONLOCAL, 4=EAST/WEST, 5=OTHER
     int sinkBeginX, sinkBeginY, sinkTile, sinkType, sinkCtrl, sinkSlr;
+    int sinkEndX, sinkEndY;
     float xCenter, yCenter, shareWeight, rnodeCostWeight, rnodeWLWeight, estWlWeight;
     float invBiasDenom;
     int budget;
@@ -644,21 +743,29 @@ inline int checkAccessAndLookahead(
             if (!willOveruseCached(child, outOcc, outSame, hasUsage)) lookahead = true;
         } else {
             bool allowed = false;
-            if (static_cast<U32>(q.sinkType) == G.ord[EAST] || static_cast<U32>(q.sinkType) == G.ord[EX_EAST]) {
-                if ((cf & West) || ct == G.ord[RESERVED]) return 1;
-                if (static_cast<U32>(q.sinkType) != G.ord[EX_EAST]) return -1;
-                allowed = (childTile == q.sinkTile || (childX == q.sinkBeginX && fides_absInt(childY - q.sinkBeginY) <= 1));
-            } else if (static_cast<U32>(q.sinkType) == G.ord[WEST] || static_cast<U32>(q.sinkType) == G.ord[EX_WEST]) {
-                if ((cf & East) || ct == G.ord[RESERVED]) return 1;
-                if (static_cast<U32>(q.sinkType) != G.ord[EX_WEST]) return -1;
-                allowed = (childTile == q.sinkTile || (childX == q.sinkBeginX && fides_absInt(childY - q.sinkBeginY) <= 1));
-            } else if (static_cast<U32>(q.sinkType) == G.ord[EX_BOTH]) {
-                if (childTile != q.sinkTile || ct != G.ord[BOTH] || q.sinkCtrl == 0) return 1;
-                allowed = true;
-            } else if (static_cast<U32>(q.sinkType) == G.ord[EX_NONLOCAL]) {
-                return 1;
-            } else {
-                return -1;
+            switch (q.sinkDirKind) {
+                case 0: // EX_EAST
+                    if ((cf & West) || ct == s_ord[RESERVED]) return 1;
+                    allowed = (childTile == q.sinkTile || (childX == q.sinkBeginX && fides_absInt(childY - q.sinkBeginY) <= 1));
+                    break;
+                case 1: // EX_WEST
+                    if ((cf & East) || ct == s_ord[RESERVED]) return 1;
+                    allowed = (childTile == q.sinkTile || (childX == q.sinkBeginX && fides_absInt(childY - q.sinkBeginY) <= 1));
+                    break;
+                case 2: // EX_BOTH
+                    if (childTile != q.sinkTile || ct != s_ord[BOTH] || q.sinkCtrl == 0) return 1;
+                    allowed = true;
+                    break;
+                case 3: // EX_NONLOCAL
+                    return 1;
+                case 4: // EAST
+                    if ((cf & West) || ct == s_ord[RESERVED]) return 1;
+                    return -1;
+                case 5: // WEST
+                    if ((cf & East) || ct == s_ord[RESERVED]) return 1;
+                    return -1;
+                default:
+                    return -1;
             }
             if (!allowed) return 1;
             if (!(cg.preFlags & PF_INT_TILE)) return -1;
@@ -669,7 +776,7 @@ inline int checkAccessAndLookahead(
     if (cf & Nonlocal) {
         bool parentLaguna = (pg.preFlags & PF_LAGUNA_TILE) != 0;
         bool childLaguna = (cg.preFlags & PF_LAGUNA_TILE) != 0;
-        if (ct == G.ord[NONLOCAL]) {
+        if (ct == s_ord[NONLOCAL]) {
             if (pf & Local) {
                 if (childLaguna) {
                     if (!q.cross || slrFast(child, cg, &pg) == q.sinkSlr) return 1;
@@ -715,6 +822,13 @@ int expandNode(U32 u, float uUpstream, U32 entering, SearchQuery& q, int depth) 
     const NodeGeomHot& pg = G.geomHot[u];
     U32 first = G.offset[u];
     U32 last = G.offset[u + 1];
+    const uint8_t cd = G.coreDeg[u];
+    if (cd < 255u && (first + static_cast<U32>(cd) < last)) {
+        const bool needSeg1 =
+            (static_cast<int>(pg.endTileX) == q.sinkEndX && fides_absInt(static_cast<int>(pg.endTileYRaw) - q.sinkEndY) <= 3)
+            || (static_cast<int>(pg.endTileX) == q.sinkBeginX && fides_absInt(static_cast<int>(pg.endTileYRaw) - q.sinkBeginY) <= 2);
+        if (!needSeg1) last = first + static_cast<U32>(cd);
+    }
     for (U32 e = first; e < last; ++e) {
         if (e + 2u < last) {
             __builtin_prefetch(&G.geomHot[G.edge[e + 2u]], 0, 1);
@@ -747,11 +861,11 @@ int expandNode(U32 u, float uUpstream, U32 entering, SearchQuery& q, int depth) 
         // Clamp negative transient delta under concurrent reads instead of forcing a Java fallback.
         if (pccIdx < 0) pccIdx = 0;
         float pccCost;
-        if (pccIdx < static_cast<int>(G.pcc.size())) {
-            pccCost = G.pcc[pccIdx];
-        } else if (G.pcc.size() >= 2) {
-            int lastIdx = static_cast<int>(G.pcc.size()) - 1;
-            pccCost = G.pcc[lastIdx] + static_cast<float>(pccIdx - lastIdx) * (G.pcc[lastIdx] - G.pcc[lastIdx - 1]);
+        if (pccIdx < s_pccLen) {
+            pccCost = s_pccPtr[pccIdx];
+        } else if (s_pccLen >= 2) {
+            int lastIdx = s_pccLen - 1;
+            pccCost = s_pccPtr[lastIdx] + static_cast<float>(pccIdx - lastIdx) * (s_pccPtr[lastIdx] - s_pccPtr[lastIdx - 1]);
         } else {
             return STATUS_FALLBACK;
         }
@@ -760,7 +874,7 @@ int expandNode(U32 u, float uUpstream, U32 entering, SearchQuery& q, int depth) 
                            + std::fabs(static_cast<float>(childY) - q.yCenter);
         float bc = cg.baseCost;
         float bias = bc * distToCenter * q.invBiasDenom;
-        float rawNc = bc * G.dyn[child].hist * pccCost;
+        float rawNc = bc * G.hist[child] * pccCost;
         float invSharing;
         float nc;
         if (sameUses == 0) {
@@ -948,8 +1062,20 @@ I32 runProbe(
     q.south = (c.flags & 32u) != 0;
     q.sinkBeginX = c.sinkBeginX;
     q.sinkBeginY = c.sinkBeginY;
+    q.sinkEndX = static_cast<int>(G.geomHot[q.sink].endTileX);
+    q.sinkEndY = static_cast<int>(G.geomHot[q.sink].endTileYRaw);
     q.sinkTile = c.sinkTile;
     q.sinkType = c.sinkType;
+    {
+        U32 st = static_cast<U32>(c.sinkType);
+        if (st == s_ord[EX_EAST]) q.sinkDirKind = 0;
+        else if (st == s_ord[EX_WEST]) q.sinkDirKind = 1;
+        else if (st == s_ord[EX_BOTH]) q.sinkDirKind = 2;
+        else if (st == s_ord[EX_NONLOCAL]) q.sinkDirKind = 3;
+        else if (st == s_ord[EAST]) q.sinkDirKind = 4;
+        else if (st == s_ord[WEST]) q.sinkDirKind = 5;
+        else q.sinkDirKind = 6;
+    }
     q.sinkCtrl = (c.flags & 64u) != 0 ? 1 : 0;
     q.sinkSlr = static_cast<int>(G.geomCold[q.sink].endSlrRaw);
     q.xCenter = c.xCenter;
@@ -1144,9 +1270,9 @@ inline void addToScopeCore(NetScopeData& sc, U32 id, I32 delta, FnOccDelta&& fnO
 
 void addToScope(NetScopeData& sc, U32 id, I32 delta) {
     addToScopeCore(sc, id, delta, [&](U32 nid, I32 occDelta) {
-        I32 before = G.dyn[nid].occ;
+        I32 before = G.occ[nid];
         I32 after = before + occDelta;
-        __atomic_store_n(&G.dyn[nid].occ, after, __ATOMIC_RELEASE);
+        __atomic_store_n(&G.occ[nid], after, __ATOMIC_RELEASE);
         onOccChanged(nid, before, after);
     });
 }
@@ -1367,7 +1493,7 @@ inline void flushGpuOccDeltas() {
     I32* vals = G.gpuDirtyOccVals.data();
     EXEC.parallelFor(cnt, 4096u, [&](size_t lo, size_t hi) {
         for (size_t i = lo; i < hi; ++i) {
-            vals[i] = G.dyn[ids[i]].occ;
+            vals[i] = G.occ[ids[i]];
         }
     });
     fidesGpuApplyOccDeltasMulti(ids, vals, cnt);
@@ -1390,14 +1516,6 @@ struct BoundaryPool {
     }
 };
 
-template <class T>
-bool readSection(std::ifstream& file, U64 at, U64 count, std::vector<T>& out) {
-    out.resize(static_cast<size_t>(count));
-    file.seekg(static_cast<std::streamoff>(at));
-    file.read(reinterpret_cast<char*>(out.data()), static_cast<std::streamsize>(count * sizeof(T)));
-    return static_cast<bool>(file);
-}
-
 struct InFlightBox {
     I32 x0, y0, x1, y1;
 };
@@ -1410,6 +1528,60 @@ inline bool boxesOverlap(const InFlightBox& a, const InFlightBox& b) {
 
 static std::mutex g_preinitMtx;
 static bool g_staticPreinitOk = false;
+static std::mutex g_gpuInitMtx;
+static std::thread g_gpuInitThread;
+static bool g_gpuInitPending = false;
+static bool g_gpuInitOk = false;
+static bool g_gpuInitBoundsOk = true;
+static int g_pendingReqMaxGpus = FG_MAX_GPUS;
+static HugeBuf<FidesGpuNodeHot> g_pendingGpuHot;
+static HugeBuf<FidesGpuDynNode> g_pendingGpuDyn;
+static std::vector<float> g_pendingGpuPcc;
+
+static std::atomic<I32> g_expectedConnCount{-1};
+
+static void ensureGpuInitJoined() {
+    if (!g_gpuInitPending) return;
+    std::lock_guard<std::mutex> lk(g_gpuInitMtx);
+    if (!g_gpuInitPending) return;
+    if (g_gpuInitThread.joinable()) g_gpuInitThread.join();
+    g_pendingGpuHot.release();
+    g_pendingGpuDyn.release();
+    if (g_gpuInitOk) {
+        G.gpuEnabled = true;
+        G.gpuCount = G.gpuMulti.numGpus;
+        if (G.pcc.size() != g_pendingGpuPcc.size()
+                || (!G.pcc.empty() && std::memcmp(G.pcc.data(), g_pendingGpuPcc.data(), G.pcc.size() * sizeof(float)) != 0)) {
+            fidesGpuUpdatePcc(G.pcc.data(), static_cast<I32>(G.pcc.size()));
+        }
+        U32 totTa = 0u, totTb = 0u;
+        for (int d = 0; d < G.gpuCount; ++d) {
+            const auto& ci = G.gpuMulti.cards[d];
+            totTa += ci.tierAWarps;
+            totTb += ci.tierBCtas;
+            fprintf(stdout,
+                    "FIDES_V40_GPU_DEV slot=%d dev=%d uuid=%s res=%.2fGiB arena=%.2fGiB free=%.2fGiB taWarps=%u tbCtas=%u init_s=%.2f\n",
+                    d, ci.deviceId, ci.deviceUuid,
+                    ci.residentBytes / double(1ULL << 30),
+                    ci.arenaBytes / double(1ULL << 30),
+                    ci.freeBytesAfter / double(1ULL << 30),
+                    ci.tierAWarps, ci.tierBCtas, ci.initSec);
+        }
+        fprintf(stdout,
+                "FIDES_V37_GPU ready=true numGpus=%d dev=%s uuid=%s res=%.2fGiB arena=%.2fGiB free=%.2fGiB taWarps=%u tbCtas=%u init_s=%.2f\n",
+                G.gpuCount, G.gpuMulti.cards[0].deviceName, G.gpuMulti.cards[0].deviceUuid,
+                G.gpuMulti.cards[0].residentBytes / double(1ULL << 30),
+                G.gpuMulti.cards[0].arenaBytes / double(1ULL << 30),
+                G.gpuMulti.cards[0].freeBytesAfter / double(1ULL << 30),
+                totTa, totTb, G.gpuMulti.initSec);
+        fflush(stdout);
+    } else {
+        fprintf(stdout, "FIDES_V37_GPU ready=false boundsOk=%d (falling back to CPU)\n", (int)g_gpuInitBoundsOk);
+        fflush(stdout);
+    }
+    std::vector<float>().swap(g_pendingGpuPcc);
+    g_gpuInitPending = false;
+}
 
 template <typename Fn>
 static void parallelForU32(U32 count, int maxThreads, Fn&& fn) {
@@ -1438,39 +1610,97 @@ static bool preinitStaticImpl(const std::string& rrgPath, const std::string& lay
     if (G.ready || g_staticPreinitOk) return true;
     auto t0 = std::chrono::steady_clock::now();
 
-    std::ifstream rrg(rrgPath, std::ios::binary);
-    if (!rrg) return false;
-    char magic[8];
+    struct MmapGuard {
+        int fd = -1;
+        const uint8_t* ptr = nullptr;
+        size_t size = 0;
+        ~MmapGuard() {
+            if (ptr != nullptr && ptr != MAP_FAILED) munmap(const_cast<uint8_t*>(ptr), size);
+            if (fd >= 0) close(fd);
+        }
+    } mg;
+
+    mg.fd = open(rrgPath.c_str(), O_RDONLY);
+    if (mg.fd < 0) return false;
+    struct stat st{};
+    if (fstat(mg.fd, &st) != 0 || st.st_size < 24) return false;
+    mg.size = static_cast<size_t>(st.st_size);
+    void* mapped = mmap(nullptr, mg.size, PROT_READ, MAP_PRIVATE, mg.fd, 0);
+    if (mapped == MAP_FAILED) return false;
+    mg.ptr = static_cast<const uint8_t*>(mapped);
+    (void) madvise(mapped, mg.size, MADV_WILLNEED);
+
+    if (std::memcmp(mg.ptr, "FIDESRRG", 8) != 0) return false;
     U32 version = 0, n = 0, m = 0, secCount = 0;
-    rrg.read(magic, 8);
-    rrg.read(reinterpret_cast<char*>(&version), 4);
-    rrg.read(reinterpret_cast<char*>(&n), 4);
-    rrg.read(reinterpret_cast<char*>(&m), 4);
-    rrg.read(reinterpret_cast<char*>(&secCount), 4);
-    if (!rrg || std::memcmp(magic, "FIDESRRG", 8) != 0 || version != 2) return false;
+    std::memcpy(&version, mg.ptr + 8, 4);
+    std::memcpy(&n, mg.ptr + 12, 4);
+    std::memcpy(&m, mg.ptr + 16, 4);
+    std::memcpy(&secCount, mg.ptr + 20, 4);
+    if (version != 2 || mg.size < 24u + static_cast<size_t>(secCount) * 56u) return false;
 
     struct Sec { std::string name; U64 count; U64 offset; };
     std::vector<Sec> secs;
     secs.reserve(secCount);
     for (U32 i = 0; i < secCount; ++i) {
-        char nameBuf[32];
-        U32 dtype = 0, pad = 0;
-        U64 cnt = 0, off = 0;
-        rrg.read(nameBuf, 32);
-        rrg.read(reinterpret_cast<char*>(&dtype), 4);
-        rrg.read(reinterpret_cast<char*>(&pad), 4);
-        rrg.read(reinterpret_cast<char*>(&cnt), 8);
-        rrg.read(reinterpret_cast<char*>(&off), 8);
+        const uint8_t* sp = mg.ptr + 24u + static_cast<size_t>(i) * 56u;
         size_t len = 0;
-        while (len < 32 && nameBuf[len] != '\0') ++len;
-        secs.push_back({std::string(nameBuf, len), cnt, off});
+        while (len < 32 && sp[len] != '\0') ++len;
+        U64 cnt = 0, off = 0;
+        std::memcpy(&cnt, sp + 40, 8);
+        std::memcpy(&off, sp + 48, 8);
+        if (off > mg.size || cnt * 4ULL > mg.size - off) return false;
+        secs.push_back({std::string(reinterpret_cast<const char*>(sp), len), cnt, off});
     }
-    auto findSec = [&](const char* name, U64& cnt, U64& off) -> bool {
+    auto findSecPtr = [&](const char* name, U64 expectCnt, const void*& outPtr) -> bool {
         for (const auto& s : secs) {
-            if (s.name == name) { cnt = s.count; off = s.offset; return true; }
+            if (s.name == name && s.count == expectCnt) {
+                outPtr = mg.ptr + s.offset;
+                return true;
+            }
         }
         return false;
     };
+
+    const void* pOff = nullptr;
+    const void* pEdge = nullptr;
+    const void* pNodeType = nullptr;
+    const void* pIntentCode = nullptr;
+    const void* pTileType = nullptr;
+    const void* pTileId = nullptr;
+    const void* pEndTileX = nullptr;
+    const void* pEndTileYRaw = nullptr;
+    const void* pTileY = nullptr;
+    const void* pLength = nullptr;
+    const void* pBaseCost = nullptr;
+    const void* pDelay = nullptr;
+    if (!findSecPtr("offset", static_cast<U64>(n) + 1ULL, pOff)
+            || !findSecPtr("edge", m, pEdge)
+            || !findSecPtr("nodeType", n, pNodeType)
+            || !findSecPtr("intentCode", n, pIntentCode)
+            || !findSecPtr("tileType", n, pTileType)
+            || !findSecPtr("tileId", n, pTileId)
+            || !findSecPtr("endTileX", n, pEndTileX)
+            || !findSecPtr("endTileYRaw", n, pEndTileYRaw)
+            || !findSecPtr("tileY", n, pTileY)
+            || !findSecPtr("length", n, pLength)
+            || !findSecPtr("baseCost", n, pBaseCost)
+            || !findSecPtr("delay", n, pDelay)) {
+        return false;
+    }
+
+    std::ifstream layout(layPath);
+    if (!layout) return false;
+    U32 slrWords = 0, types = 0, tiles = 0;
+    layout >> slrWords >> types >> tiles;
+    if (!layout || types == 0 || tiles == 0) return false;
+    G.ord.resize(OrdinalCount);
+    G.typeFlags.resize(types);
+    G.tileFlags.resize(tiles);
+    for (U32& v : G.ord) layout >> v;
+    for (U32& v : G.typeFlags) layout >> v;
+    for (U32& v : G.tileFlags) layout >> v;
+    if (!layout) return false;
+    for (int oi = 0; oi < OrdinalCount; ++oi) s_ord[oi] = G.ord[oi];
 
     G.n = n;
     G.m = m;
@@ -1495,127 +1725,206 @@ static bool preinitStaticImpl(const std::string& rrgPath, const std::string& lay
         }
     } numaInterleaveGuard;
 #endif
-    U64 cnt = 0, off = 0;
-    std::vector<I32> nodeType, intentCode, tileType, tileId, endTileX, endTileYRaw, tileY, length;
-    std::vector<float> baseCost, delay;
-    if (!findSec("offset", cnt, off) || cnt != n + 1 || !readSection(rrg, off, cnt, G.offset)) return false;
-    if (!findSec("edge", cnt, off) || cnt != m || !readSection(rrg, off, cnt, G.edge)) return false;
-    if (!findSec("nodeType", cnt, off) || cnt != n || !readSection(rrg, off, cnt, nodeType)) return false;
-    if (!findSec("intentCode", cnt, off) || cnt != n || !readSection(rrg, off, cnt, intentCode)) return false;
-    if (!findSec("tileType", cnt, off) || cnt != n || !readSection(rrg, off, cnt, tileType)) return false;
-    if (!findSec("tileId", cnt, off) || cnt != n || !readSection(rrg, off, cnt, tileId)) return false;
-    if (!findSec("endTileX", cnt, off) || cnt != n || !readSection(rrg, off, cnt, endTileX)) return false;
-    if (!findSec("endTileYRaw", cnt, off) || cnt != n || !readSection(rrg, off, cnt, endTileYRaw)) return false;
-    if (!findSec("tileY", cnt, off) || cnt != n || !readSection(rrg, off, cnt, tileY)) return false;
-    if (!findSec("length", cnt, off) || cnt != n || !readSection(rrg, off, cnt, length)) return false;
-    if (!findSec("baseCost", cnt, off) || cnt != n || !readSection(rrg, off, cnt, baseCost)) return false;
-    if (!findSec("delay", cnt, off) || cnt != n || !readSection(rrg, off, cnt, delay)) return false;
 
-    std::ifstream layout(layPath);
-    if (!layout) return false;
-    U32 slrWords = 0, types = 0, tiles = 0;
-    layout >> slrWords >> types >> tiles;
-    if (!layout || types == 0 || tiles == 0) return false;
-    G.ord.resize(OrdinalCount);
-    G.typeFlags.resize(types);
-    G.tileFlags.resize(tiles);
-    for (U32& v : G.ord) layout >> v;
-    for (U32& v : G.typeFlags) layout >> v;
-    for (U32& v : G.tileFlags) layout >> v;
-    if (!layout) return false;
+    const U32* rawOff = static_cast<const U32*>(pOff);
+    const U32* rawEdge = static_cast<const U32*>(pEdge);
+    G.offset.resizeNoInit(static_cast<size_t>(n) + 1u);
+    parallelForU32(n + 1u, 36, [&](U32 lo, U32 hi) {
+        std::memcpy(G.offset.data() + lo, rawOff + lo, static_cast<size_t>(hi - lo) * sizeof(U32));
+    });
+    G.edge.resizeNoInit(m);
+    parallelForU32(m, 36, [&](U32 lo, U32 hi) {
+        std::memcpy(G.edge.data() + lo, rawEdge + lo, static_cast<size_t>(hi - lo) * sizeof(U32));
+    });
 
-    G.geomHot.resize(n);
-    G.geomCold.resize(n);
+    const I32* nodeType = static_cast<const I32*>(pNodeType);
+    const I32* intentCode = static_cast<const I32*>(pIntentCode);
+    const I32* tileType = static_cast<const I32*>(pTileType);
+    const I32* tileId = static_cast<const I32*>(pTileId);
+    const I32* endTileX = static_cast<const I32*>(pEndTileX);
+    const I32* endTileYRaw = static_cast<const I32*>(pEndTileYRaw);
+    const I32* tileY = static_cast<const I32*>(pTileY);
+    const I32* length = static_cast<const I32*>(pLength);
+    const float* baseCost = static_cast<const float*>(pBaseCost);
+    const float* delay = static_cast<const float*>(pDelay);
+
+    G.geomHot.resizeNoInit(n);
+    G.geomCold.resizeNoInit(n);
+    G.occ.resizeNoInit(n);
+    G.hist.resizeNoInit(n);
+    G.coreDeg.resizeNoInit(n);
+    G.overusedPos.resizeNoInit(n);
+    G.lastCommitSeq.resizeNoInit(n);
+    G.lastCommitNet.resizeNoInit(n);
+    G.prevOtherSeq.resizeNoInit(n);
+    const char* disableGpuEnv = std::getenv("FIDES_V37_DISABLE_GPU");
+    bool tryGpu = (disableGpuEnv == nullptr || std::strcmp(disableGpuEnv, "1") != 0);
+    if (tryGpu) {
+        G.gpuDirtyOccStamp.resizeNoInit(n);
+        G.waveOverusedStamp.resizeNoInit(n);
+        G.waveOvClaimRem.resizeNoInit(n);
+        G.waveCommitKey.resizeNoInit(n);
+    }
+
+    const U32 ordSll = s_ord[SLL];
+    const U32 ordIntTile = s_ord[INT_TILE];
+    const U32 ordPinbounce = s_ord[PINBOUNCE];
+    const U32 ordPinfeed = s_ord[PINFEED];
+    const U32 ordCleOut = s_ord[CLE_OUTPUT];
+
+    HugeBuf<uint32_t> seg1Pack;
+    seg1Pack.resizeNoInit(n);
     std::atomic<bool> boundsOk{true};
     parallelForU32(n, 36, [&](U32 lo, U32 hi) {
+        const size_t cnt = static_cast<size_t>(hi - lo);
+        std::memset(G.lastCommitSeq.data() + lo, 0, cnt * sizeof(U32));
+        std::memset(G.prevOtherSeq.data() + lo, 0, cnt * sizeof(U32));
+        if (tryGpu) {
+            std::memset(G.gpuDirtyOccStamp.data() + lo, 0, cnt * sizeof(U32));
+            std::memset(G.waveOverusedStamp.data() + lo, 0, cnt * sizeof(U32));
+            std::memset(G.waveOvClaimRem.data() + lo, 0, cnt * sizeof(I32));
+            std::memset(G.waveCommitKey.data() + lo, 0, cnt * sizeof(U64));
+        }
         bool localOk = true;
         for (U32 i = lo; i < hi; ++i) {
-            if (endTileX[i] < -32768 || endTileX[i] > 32767
-                    || endTileYRaw[i] < -32768 || endTileYRaw[i] > 32767
-                    || tileY[i] < -32768 || tileY[i] > 32767
-                    || length[i] < 0 || length[i] > 65535
-                    || nodeType[i] < 0 || static_cast<U32>(nodeType[i]) >= types || nodeType[i] > 255
-                    || tileType[i] < 0 || static_cast<U32>(tileType[i]) >= tiles
-                    || G.typeFlags[nodeType[i]] > 255u
-                    || baseCost[i] < 0.0f || std::isnan(baseCost[i])) {
+            I32 ex = endTileX[i];
+            I32 ey = endTileYRaw[i];
+            I32 ty = tileY[i];
+            I32 ln = length[i];
+            I32 nt = nodeType[i];
+            I32 tt = tileType[i];
+            I32 ic = intentCode[i];
+            float bc = baseCost[i];
+            if (ex < -32768 || ex > 32767
+                    || ey < -32768 || ey > 32767
+                    || ty < -32768 || ty > 32767
+                    || ln < 0 || ln > 65535
+                    || nt < 0 || static_cast<U32>(nt) >= types || nt > 255
+                    || tt < 0 || static_cast<U32>(tt) >= tiles
+                    || G.typeFlags[nt] > 255u
+                    || bc < 0.0f || std::isnan(bc)) {
                 fprintf(stdout, "FIDES_NATIVE_CPU v29 geom bounds exceeded at i=%u x=%d y=%d ty=%d len=%d nt=%d tt=%d\n",
-                        i, endTileX[i], endTileYRaw[i], tileY[i], length[i], nodeType[i], tileType[i]);
+                        i, ex, ey, ty, ln, nt, tt);
                 fflush(stdout);
                 localOk = false;
                 break;
             }
             NodeGeomHot& gh = G.geomHot[i];
             NodeGeomCold& gc = G.geomCold[i];
-            gh.endTileX = static_cast<I16>(endTileX[i]);
-            gh.endTileYRaw = static_cast<I16>(endTileYRaw[i]);
-            gh.tileY = static_cast<I16>(tileY[i]);
-            gh.length = static_cast<U16>(length[i]);
-            gh.typeFlags = static_cast<uint8_t>(G.typeFlags[nodeType[i]]);
-            gh.nodeType = static_cast<uint8_t>(nodeType[i]);
-            gh.baseCost = baseCost[i];
+            gh.endTileX = static_cast<I16>(ex);
+            gh.endTileYRaw = static_cast<I16>(ey);
+            gh.tileY = static_cast<I16>(ty);
+            gh.length = static_cast<U16>(ln);
+            gh.typeFlags = static_cast<uint8_t>(G.typeFlags[nt]);
+            gh.nodeType = static_cast<uint8_t>(nt);
+            gh.baseCost = bc;
             gc.tileId = tileId[i];
             gc.endSlrRaw = -1;
             gc.endSlrTileY = -1;
 
             U16 pf = 0;
-            if (static_cast<U32>(nodeType[i]) == G.ord[SLL]) pf |= PF_SLL;
-            if (G.tileFlags[tileType[i]] & 1u) pf |= PF_LAGUNA_TILE;
-            if (G.tileFlags[tileType[i]] & 2u) pf |= PF_CLB_TILE;
-            if (static_cast<U32>(tileType[i]) == G.ord[INT_TILE]) pf |= PF_INT_TILE;
-            if (static_cast<U32>(intentCode[i]) == G.ord[PINBOUNCE]) pf |= PF_PINBOUNCE;
-            if (static_cast<U32>(intentCode[i]) == G.ord[PINFEED]) pf |= PF_PINFEED;
-            if (static_cast<U32>(intentCode[i]) == G.ord[CLE_OUTPUT]) pf |= PF_CLE_OUTPUT;
+            if (static_cast<U32>(nt) == ordSll) pf |= PF_SLL;
+            if (G.tileFlags[tt] & 1u) pf |= PF_LAGUNA_TILE;
+            if (G.tileFlags[tt] & 2u) pf |= PF_CLB_TILE;
+            if (static_cast<U32>(tt) == ordIntTile) pf |= PF_INT_TILE;
+            if (static_cast<U32>(ic) == ordPinbounce) pf |= PF_PINBOUNCE;
+            if (static_cast<U32>(ic) == ordPinfeed) pf |= PF_PINFEED;
+            if (static_cast<U32>(ic) == ordCleOut) pf |= PF_CLE_OUTPUT;
             if (delay[i] > 10000.0f) pf |= PF_UTURN_DELAY;
             gh.preFlags = pf;
+
+            const U32 cf = G.typeFlags[nt];
+            const bool seg1Cand = ((((cf & Local) != 0u) && ((cf & Leading) == 0u))
+                                   || (((cf & Exclusive) != 0u) && ((pf & PF_PINBOUNCE) == 0u)))
+                                  && ex >= -8192 && ex < 24576 && ey >= -8192 && ey < 24576;
+            const U32 px = (ex >= -8192 && ex < 24576) ? (static_cast<U32>(ex + 8192) & 0x7FFFu) : 0u;
+            const U32 py = (ey >= -8192 && ey < 24576) ? (static_cast<U32>(ey + 8192) & 0x7FFFu) : 0u;
+            seg1Pack[i] = (seg1Cand ? 0x80000000u : 0u) | px | (py << 15);
+
+            G.overusedPos[i] = -1;
+            G.lastCommitNet[i] = UINT32_MAX;
         }
         if (!localOk) boundsOk.store(false, std::memory_order_relaxed);
     });
     if (!boundsOk.load(std::memory_order_relaxed)) return false;
 
-    {
-        std::vector<I32>().swap(nodeType);
-        std::vector<I32>().swap(intentCode);
-        std::vector<I32>().swap(tileType);
-        std::vector<I32>().swap(tileId);
-        std::vector<I32>().swap(endTileX);
-        std::vector<I32>().swap(endTileYRaw);
-        std::vector<I32>().swap(tileY);
-        std::vector<I32>().swap(length);
-        std::vector<float>().swap(baseCost);
-        std::vector<float>().swap(delay);
-    }
+    std::atomic<U64> seg1Total{0};
+    parallelForU32(n, 36, [&](U32 lo, U32 hi) {
+        U64 localSeg1 = 0;
+        U32 tmpCore[256];
+        U32 tmpSeg1[256];
+        for (U32 u = lo; u < hi; ++u) {
+            U32 e0 = G.offset[u], e1 = G.offset[u + 1u];
+            U32 deg = e1 - e0;
+            const NodeGeomHot& ug = G.geomHot[u];
+            if (deg == 0u || deg > 255u || (ug.preFlags & PF_SLL)
+                    || ug.endTileX < -8192 || ug.endTileX >= 24576
+                    || ug.endTileYRaw < -8192 || ug.endTileYRaw >= 24576) {
+                G.coreDeg[u] = (deg <= 255u) ? static_cast<uint8_t>(deg) : 255u;
+                continue;
+            }
+            const uint32_t up = seg1Pack[u];
+            const int upY = static_cast<int>((up >> 15) & 0x7FFFu);
+            U32 coreLen = 0u;
+            U32 seg1Len = 0u;
+            for (U32 e = e0; e < e1; ++e) {
+                U32 c = G.edge[e];
+                const uint32_t cp = seg1Pack[c];
+                if ((cp & 0x80000000u) != 0u
+                        && ((cp ^ up) & 0x7FFFu) == 0u
+                        && fides_absInt(static_cast<int>((cp >> 15) & 0x7FFFu) - upY) <= 1) {
+                    tmpSeg1[seg1Len++] = c;
+                } else {
+                    tmpCore[coreLen++] = c;
+                }
+            }
+            if (seg1Len == 0u) {
+                G.coreDeg[u] = static_cast<uint8_t>(deg);
+            } else if (coreLen >= 255u) {
+                G.coreDeg[u] = 255u;
+            } else {
+                for (U32 k = 0u; k < coreLen; ++k) G.edge[e0 + k] = tmpCore[k];
+                for (U32 k = 0u; k < seg1Len; ++k) G.edge[e0 + coreLen + k] = tmpSeg1[k];
+                G.coreDeg[u] = static_cast<uint8_t>(coreLen);
+                localSeg1 += seg1Len;
+            }
+        }
+        seg1Total.fetch_add(localSeg1, std::memory_order_relaxed);
+    });
 
-    G.dyn.resize(n);
-    G.overusedPos.assign(n, -1);
     G.overusedList.clear();
-    G.lastCommitSeq.assign(n, 0);
-    G.lastCommitNet.assign(n, UINT32_MAX);
-    G.prevOtherSeq.assign(n, 0);
     G.commitSeq = 1;
     G.gpuStampWaveEpoch = 0;
     G.lastTailFbCount = 0;
     G.microStuckRounds = 0;
+    G.corrInit = false;
+    G.snapReady = false;
+    G.snapOffsets.clear();
+    G.snapEntries.clear();
+    G.snapDirtyFlag.clear();
+    G.snapDirtyList.clear();
+    G.snapCandStamp.clear();
+    G.snapCandEpoch = 1u;
+    G.lastRoundActive.clear();
+    G.activeStreakFlag.clear();
+    G.activeStreakList.clear();
     G.netScopes.reserve(1 << 21);
     S.ensureN(n);
 
-    const char* disableGpuEnv = std::getenv("FIDES_V37_DISABLE_GPU");
-    bool tryGpu = (disableGpuEnv == nullptr || std::strcmp(disableGpuEnv, "1") != 0);
     if (tryGpu) {
-        G.gpuDirtyOccStamp.assign(n, 0u);
         G.gpuDirtyOccEpoch = 1u;
         G.gpuDirtyOccIds.reserve(1 << 20);
         G.gpuDirtyOccVals.reserve(1 << 20);
-        G.waveOverusedStamp.assign(n, 0u);
-        G.waveOvClaimRem.assign(n, 0);
         G.waveOverusedEpoch = 1u;
-        G.waveCommitKey.assign(n, 0ULL);
         G.waveCommitEpoch = 1u;
         for (int ms = 0; ms < 1024; ++ms) G.megaCache[ms] = {UINT32_MAX, 0u, 0u};
     }
 
     g_staticPreinitOk = true;
     double elapsedSec = std::chrono::duration<double>(std::chrono::steady_clock::now() - t0).count();
-    fprintf(stdout, "FIDES_NATIVE_CPU v67 preinit_static=true N=%u M=%u time_s=%.2f\n", n, m, elapsedSec);
+    fprintf(stdout, "FIDES_NATIVE_CPU v67 preinit_static=true N=%u M=%u seg1=%llu (%.2f%%) time_s=%.2f\n",
+            n, m, static_cast<unsigned long long>(seg1Total.load()),
+            m ? (static_cast<double>(seg1Total.load()) * 100.0 / static_cast<double>(m)) : 0.0, elapsedSec);
     fflush(stdout);
     return true;
 }
@@ -1652,28 +1961,63 @@ static bool attachDynamicImpl(
         return tile >= 0 && tile < G.slr[5] && G.slr[6 + G.slr[2] + 2 * G.slr[3] + G.slr[4] + tile] != 0;
     };
 
-    std::vector<I32> occTmp(n);
-    std::vector<float> histTmp(n);
+    HugeBuf<I32> occTmp;
+    occTmp.resizeNoInit(n);
+    HugeBuf<float> histTmp;
+    histTmp.resizeNoInit(n);
     env->GetIntArrayRegion(jOcc, 0, static_cast<jsize>(n), occTmp.data());
     env->GetFloatArrayRegion(jHist, 0, static_cast<jsize>(n), histTmp.data());
     G.overusedList.clear();
-    I32 cap = static_cast<I32>(G.ord[CAPACITY]);
-    for (U32 id = 0; id < n; ++id) {
-        G.dyn[id].occ = occTmp[id];
-        G.dyn[id].hist = histTmp[id];
-        if (occTmp[id] > cap) {
-            G.overusedPos[id] = static_cast<I32>(G.overusedList.size());
-            G.overusedList.push_back(id);
+    I32 cap = static_cast<I32>(s_ord[CAPACITY]);
+    {
+        const int chunks = 36;
+        std::vector<std::vector<U32>> ovShards(chunks);
+        U32 step = (n + static_cast<U32>(chunks) - 1u) / static_cast<U32>(chunks);
+        BoundaryPool::runChunks(chunks, [&](int c) {
+            U32 lo = static_cast<U32>(c) * step;
+            U32 hi = std::min(n, lo + step);
+            auto& ovOut = ovShards[c];
+            for (U32 id = lo; id < hi; ++id) {
+                I32 ov = occTmp[id];
+                G.occ[id] = ov;
+                G.hist[id] = histTmp[id];
+                if (ov > cap) ovOut.push_back(id);
+            }
+        });
+        for (int c = 0; c < chunks; ++c) {
+            for (U32 id : ovShards[c]) {
+                G.overusedPos[id] = static_cast<I32>(G.overusedList.size());
+                G.overusedList.push_back(id);
+            }
         }
     }
 
     jsize pccLen = env->GetArrayLength(jPcc);
     G.pcc.resize(pccLen);
     env->GetFloatArrayRegion(jPcc, 0, pccLen, G.pcc.data());
+    s_pccPtr = G.pcc.data();
+    s_pccLen = static_cast<int>(G.pcc.size());
 
     const char* disableGpuEnv = std::getenv("FIDES_V37_DISABLE_GPU");
-    bool tryGpu = (disableGpuEnv == nullptr || std::strcmp(disableGpuEnv, "1") != 0);
-    std::vector<FidesGpuNodeHot> gpuHot(tryGpu ? n : 0);
+    I32 minGpuConns = 100000;
+    if (const char* mcEnv = std::getenv("FIDES_V92_GPU_MIN_CONNS")) {
+        int parsed = std::atoi(mcEnv);
+        if (parsed >= 0) minGpuConns = static_cast<I32>(parsed);
+    }
+    const I32 expectedConns = g_expectedConnCount.load(std::memory_order_relaxed);
+    const bool skipSmallGpu = (expectedConns >= 0 && expectedConns < minGpuConns);
+    if (skipSmallGpu) {
+        fprintf(stdout, "FIDES_V92_GPU_SKIP expected_conns=%d min=%d\n",
+                static_cast<int>(expectedConns), static_cast<int>(minGpuConns));
+        fflush(stdout);
+    }
+    bool tryGpu = !skipSmallGpu && (disableGpuEnv == nullptr || std::strcmp(disableGpuEnv, "1") != 0);
+    HugeBuf<FidesGpuNodeHot> gpuHot;
+    HugeBuf<FidesGpuDynNode> gpuDyn;
+    if (tryGpu) {
+        gpuHot.resizeNoInit(n);
+        gpuDyn.resizeNoInit(n);
+    }
     std::atomic<bool> boundsOk{true};
     parallelForU32(n, 36, [&](U32 lo, U32 hi) {
         bool localOk = true;
@@ -1715,6 +2059,7 @@ static bool attachDynamicImpl(
                          | ((static_cast<U32>(gc.endSlrTileY + 1) & 0x7u) << 25);
                     h.baseCost = g.baseCost;
                     gpuHot[i] = h;
+                    gpuDyn[i] = FidesGpuDynNode{G.occ[i], G.hist[i]};
                 }
             }
         }
@@ -1728,35 +2073,24 @@ static bool attachDynamicImpl(
             if (parsed >= 1 && parsed <= FG_MAX_GPUS) reqMaxGpus = parsed;
         }
         bool ok = boundsOk.load(std::memory_order_relaxed);
-        if (ok && fidesGpuInitMulti(
-                G.n, G.m, G.offset.data(), G.edge.data(),
-                gpuHot.data(), reinterpret_cast<const FidesGpuDynNode*>(G.dyn.data()),
-                G.ord.data(), G.sllLen,
-                G.nextLaguna.data(), G.prevLaguna.data(), static_cast<I32>(G.nextLaguna.size()),
-                G.pcc.data(), static_cast<I32>(G.pcc.size()), reqMaxGpus, &G.gpuMulti)) {
-            G.gpuEnabled = true;
-            G.gpuCount = G.gpuMulti.numGpus;
-            U32 totTa = 0u, totTb = 0u;
-            for (int d = 0; d < G.gpuCount; ++d) {
-                const auto& ci = G.gpuMulti.cards[d];
-                totTa += ci.tierAWarps;
-                totTb += ci.tierBCtas;
-                fprintf(stdout,
-                        "FIDES_V40_GPU_DEV slot=%d dev=%d uuid=%s res=%.2fGiB arena=%.2fGiB free=%.2fGiB taWarps=%u tbCtas=%u init_s=%.2f\n",
-                        d, ci.deviceId, ci.deviceUuid,
-                        ci.residentBytes / double(1ULL << 30),
-                        ci.arenaBytes / double(1ULL << 30),
-                        ci.freeBytesAfter / double(1ULL << 30),
-                        ci.tierAWarps, ci.tierBCtas, ci.initSec);
-            }
-            fprintf(stdout,
-                    "FIDES_V37_GPU ready=true numGpus=%d dev=%s uuid=%s res=%.2fGiB arena=%.2fGiB free=%.2fGiB taWarps=%u tbCtas=%u init_s=%.2f\n",
-                    G.gpuCount, G.gpuMulti.cards[0].deviceName, G.gpuMulti.cards[0].deviceUuid,
-                    G.gpuMulti.cards[0].residentBytes / double(1ULL << 30),
-                    G.gpuMulti.cards[0].arenaBytes / double(1ULL << 30),
-                    G.gpuMulti.cards[0].freeBytesAfter / double(1ULL << 30),
-                    totTa, totTb, G.gpuMulti.initSec);
-            fflush(stdout);
+        g_gpuInitBoundsOk = ok;
+        g_gpuInitOk = false;
+        if (ok) {
+            std::lock_guard<std::mutex> lk(g_gpuInitMtx);
+            g_pendingReqMaxGpus = reqMaxGpus;
+            g_pendingGpuHot.swap(gpuHot);
+            g_pendingGpuDyn.swap(gpuDyn);
+            g_pendingGpuPcc = G.pcc;
+            g_gpuInitPending = true;
+            g_gpuInitThread = std::thread([]() {
+                g_gpuInitOk = fidesGpuInitMulti(
+                        G.n, G.m, G.offset.data(), G.edge.data(), G.coreDeg.data(),
+                        g_pendingGpuHot.data(), g_pendingGpuDyn.data(),
+                        G.ord.data(), G.sllLen,
+                        G.nextLaguna.data(), G.prevLaguna.data(), static_cast<I32>(G.nextLaguna.size()),
+                        g_pendingGpuPcc.data(), static_cast<I32>(g_pendingGpuPcc.size()),
+                        g_pendingReqMaxGpus, &G.gpuMulti);
+            });
         } else {
             fprintf(stdout, "FIDES_V37_GPU ready=false boundsOk=%d (falling back to CPU)\n", (int)ok);
             fflush(stdout);
@@ -1771,6 +2105,11 @@ static bool attachDynamicImpl(
 }
 
 extern "C" {
+
+JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_nativeSetDesignConnCount(
+        JNIEnv*, jclass, jint connCount) {
+    g_expectedConnCount.store(static_cast<I32>(connCount), std::memory_order_relaxed);
+}
 
 JNIEXPORT jboolean JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_nativePreinitStatic(
         JNIEnv* env, jclass, jstring jRrgPath, jstring jLayoutPath) {
@@ -1951,6 +2290,9 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     jsize len = env->GetArrayLength(jPcc);
     G.pcc.resize(len);
     env->GetFloatArrayRegion(jPcc, 0, len, G.pcc.data());
+    s_pccPtr = G.pcc.data();
+    s_pccLen = static_cast<int>(G.pcc.size());
+    if (g_gpuInitPending) return;
     if (G.gpuEnabled) {
         fidesGpuUpdatePcc(G.pcc.data(), static_cast<I32>(G.pcc.size()));
     }
@@ -1971,6 +2313,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     G.consecCongested.assign(static_cast<size_t>(n), 0);
     G.connWiden.assign(static_cast<size_t>(n), 0);
     G.tailFailStreak.assign(static_cast<size_t>(n), 0);
+    G.gpuOverflowed.assign(static_cast<size_t>(n), 0);
 
     std::vector<jint> netId(n), srcId(n), sinkId(n), ox0(n), oy0(n), ox1(n), oy1(n);
     std::vector<jint> sbx(n), sby(n), stile(n), stype(n), nsize(n), dhpwl(n);
@@ -2015,6 +2358,343 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     }
 }
 
+namespace {
+
+inline I32 fidesFloorDiv4(I32 a) {
+    return (a >= 0) ? (a / 4) : -((-a + 3) / 4);
+}
+
+struct NativeCoarseScratch {
+    std::vector<I32> tags;
+    std::vector<I32> distances;
+    std::vector<I32> previous;
+    std::vector<I32> heap;
+    std::vector<I32> heapPos;
+    I32 gen = 0;
+    I32 sz = 0;
+
+    void begin(I32 count) {
+        if (static_cast<size_t>(count) > tags.size()) {
+            size_t cap = std::max<size_t>(static_cast<size_t>(count), std::max<size_t>(128u, 2u * tags.size()));
+            tags.assign(cap, 0);
+            distances.resize(cap);
+            previous.resize(cap);
+            heap.resize(cap);
+            heapPos.resize(cap);
+            gen = 0;
+        }
+        if (++gen == 0) {
+            std::fill(tags.begin(), tags.end(), 0);
+            gen = 1;
+        }
+        sz = 0;
+    }
+
+    inline I32 dist(I32 cell) const {
+        return (tags[cell] == gen) ? distances[cell] : std::numeric_limits<I32>::max();
+    }
+
+    inline bool less(I32 a, I32 b) const {
+        I32 ca = distances[a], cb = distances[b];
+        return ca < cb || (ca == cb && a < b);
+    }
+
+    inline void decrease(I32 cell, I32 cost, I32 from) {
+        I32 idx;
+        if (tags[cell] != gen) {
+            tags[cell] = gen;
+            idx = sz++;
+        } else {
+            idx = heapPos[cell];
+        }
+        distances[cell] = cost;
+        previous[cell] = from;
+        while (idx > 0) {
+            I32 parent = (idx - 1) >> 1;
+            I32 above = heap[parent];
+            if (!less(cell, above)) break;
+            heap[idx] = above;
+            heapPos[above] = idx;
+            idx = parent;
+        }
+        heap[idx] = cell;
+        heapPos[cell] = idx;
+    }
+
+    inline I32 removeFirst() {
+        I32 res = heap[0];
+        heapPos[res] = -1;
+        I32 last = heap[--sz];
+        if (sz == 0) return res;
+        I32 idx = 0;
+        for (I32 child = 1; child < sz; child = 2 * idx + 1) {
+            if (child + 1 < sz && less(heap[child + 1], heap[child])) ++child;
+            if (!less(heap[child], last)) break;
+            heap[idx] = heap[child];
+            heapPos[heap[idx]] = idx;
+            idx = child;
+        }
+        heap[idx] = last;
+        heapPos[last] = idx;
+        return res;
+    }
+
+    inline void relax(I32 from, I32 next, I32 cost, I32 occ) {
+        I32 imp = cost + 1 + occ;
+        if (imp < dist(next)) decrease(next, imp, from);
+    }
+};
+
+}  // namespace
+
+JNIEXPORT jintArray JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_nativeExportPortals(
+        JNIEnv* env, jclass, jintArray jSlrMin, jintArray jSlrMax) {
+    if (!g_staticPreinitOk || G.slr.size() < 6) {
+        return env->NewIntArray(0);
+    }
+    jsize slrCap = env->GetArrayLength(jSlrMin);
+    std::vector<I32> slrMin(static_cast<size_t>(slrCap)), slrMax(static_cast<size_t>(slrCap));
+    if (slrCap > 0) {
+        env->GetIntArrayRegion(jSlrMin, 0, slrCap, slrMin.data());
+        env->GetIntArrayRegion(jSlrMax, 0, slrCap, slrMax.data());
+    }
+    const I32 yLen = (G.slr[0] == 1) ? G.slr[2] : 0;
+    const I32* yToSlr = (yLen > 0) ? (G.slr.data() + 6) : nullptr;
+    const U32 ordNonlocal = s_ord[NONLOCAL];
+    const U32 n = G.n;
+    const U32 chunk = 1u << 20;
+    const int numChunks = static_cast<int>(std::max<U32>(1u, (n + chunk - 1u) / chunk));
+
+    struct PortalRec {
+        I32 from, to;
+        U64 cell;
+        I32 ingressX, ingressY, sllX, sllRawY, exitX, exitY;
+    };
+    std::vector<std::vector<PortalRec>> chunkRecs(static_cast<size_t>(numChunks));
+    BoundaryPool::runChunks(numChunks, [&](int ci) {
+        U32 fromP = static_cast<U32>(ci) * chunk;
+        U32 toP = std::min(n, fromP + chunk);
+        std::unordered_map<U64, std::unordered_set<U64>> localSeen;
+        auto& out = chunkRecs[static_cast<size_t>(ci)];
+        for (U32 parent = fromP; parent < toP; ++parent) {
+            const NodeGeomHot& pgh = G.geomHot[parent];
+            if (pgh.nodeType != ordNonlocal || !(pgh.preFlags & PF_LAGUNA_TILE)) continue;
+            I32 py = static_cast<I32>(pgh.endTileYRaw);
+            I32 from = (py >= 0 && py < yLen) ? yToSlr[py] : -1;
+            if (from < 0 || from >= slrCap || py < slrMin[from] || py > slrMax[from]) continue;
+            U32 e0 = G.offset[parent], e1 = G.offset[parent + 1u];
+            for (U32 edge = e0; edge < e1; ++edge) {
+                U32 sll = G.edge[edge];
+                const NodeGeomHot& sgh = G.geomHot[sll];
+                if (!(sgh.preFlags & PF_SLL)) continue;
+                I32 sy = (py == static_cast<I32>(sgh.endTileYRaw))
+                        ? static_cast<I32>(sgh.tileY)
+                        : static_cast<I32>(sgh.endTileYRaw);
+                I32 to = (sy >= 0 && sy < yLen) ? yToSlr[sy] : -1;
+                if (to < 0 || to >= slrCap || sy < slrMin[to] || sy > slrMax[to] || fides_absInt(from - to) != 1) {
+                    continue;
+                }
+                U32 s0 = G.offset[sll], s1 = G.offset[sll + 1u];
+                for (U32 outE = s0; outE < s1; ++outE) {
+                    U32 child = G.edge[outE];
+                    const NodeGeomHot& cgh = G.geomHot[child];
+                    if (cgh.nodeType != ordNonlocal || !(cgh.preFlags & PF_LAGUNA_TILE)
+                            || G.geomCold[parent].tileId == G.geomCold[child].tileId) {
+                        continue;
+                    }
+                    I32 cy = static_cast<I32>(cgh.endTileYRaw);
+                    I32 cSlr = (cy >= 0 && cy < yLen) ? yToSlr[cy] : -1;
+                    if (cSlr != to || cy < slrMin[to] || cy > slrMax[to]) continue;
+                    U64 dirKey = (static_cast<U64>(static_cast<U32>(from)) << 32) | static_cast<U32>(to);
+                    U32 rows = ((static_cast<U32>(py / 4) & 0xFFFFu) << 16) | (static_cast<U32>(cy / 4) & 0xFFFFu);
+                    U64 cellKey = (static_cast<U64>(static_cast<U32>(sgh.endTileX)) << 32) | static_cast<U64>(rows);
+                    if (localSeen[dirKey].insert(cellKey).second) {
+                        out.push_back(PortalRec{
+                            from, to, cellKey,
+                            static_cast<I32>(pgh.endTileX), py,
+                            static_cast<I32>(sgh.endTileX), static_cast<I32>(sgh.endTileYRaw),
+                            static_cast<I32>(cgh.endTileX), cy
+                        });
+                    }
+                }
+            }
+        }
+    });
+
+    std::unordered_map<U64, std::unordered_set<U64>> globalSeen;
+    std::vector<jint> flat;
+    flat.reserve(16384u);
+    for (int ci = 0; ci < numChunks; ++ci) {
+        for (const PortalRec& pr : chunkRecs[static_cast<size_t>(ci)]) {
+            U64 dirKey = (static_cast<U64>(static_cast<U32>(pr.from)) << 32) | static_cast<U32>(pr.to);
+            if (globalSeen[dirKey].insert(pr.cell).second) {
+                flat.push_back(pr.from);
+                flat.push_back(pr.to);
+                flat.push_back(pr.ingressX);
+                flat.push_back(pr.ingressY);
+                flat.push_back(pr.sllX);
+                flat.push_back(pr.sllRawY);
+                flat.push_back(pr.exitX);
+                flat.push_back(pr.exitY);
+            }
+        }
+    }
+    jintArray outArr = env->NewIntArray(static_cast<jsize>(flat.size()));
+    if (!flat.empty()) {
+        env->SetIntArrayRegion(outArr, 0, static_cast<jsize>(flat.size()), flat.data());
+    }
+    return outArr;
+}
+
+JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_nativeInitCorridorGrid(
+        JNIEnv* env, jclass,
+        jint fLeft, jint fBottom, jint fRight, jint fTop,
+        jint coarseLeft, jint coarseBottom, jint coarseHeight,
+        jintArray jCoarseOcc, jbyteArray jConnCorrMode) {
+    const size_t numConns = G.conns.size();
+    G.corrBx0.assign(numConns, 0);
+    G.corrBy0.assign(numConns, 0);
+    G.corrBx1.assign(numConns, 0);
+    G.corrBy1.assign(numConns, 0);
+    G.corrBuse.assign(numConns, 0u);
+    if (numConns == 0u) {
+        G.corrInit = true;
+        return;
+    }
+
+    jsize occLen = env->GetArrayLength(jCoarseOcc);
+    std::vector<I32> coarseOcc(static_cast<size_t>(occLen));
+    if (occLen > 0) env->GetIntArrayRegion(jCoarseOcc, 0, occLen, coarseOcc.data());
+    std::vector<uint8_t> corrMode(numConns);
+    env->GetByteArrayRegion(jConnCorrMode, 0, static_cast<jsize>(numConns), reinterpret_cast<jbyte*>(corrMode.data()));
+
+    const size_t occSize = coarseOcc.size();
+    auto weightAt = [&](I32 cx, I32 cy) -> I32 {
+        size_t idx = static_cast<size_t>(cx - coarseLeft) * static_cast<size_t>(coarseHeight) + static_cast<size_t>(cy - coarseBottom);
+        return (idx < occSize) ? coarseOcc[idx] : 0;
+    };
+    auto inRect = [](I32 l, I32 b, I32 r, I32 t, I32 x, I32 y) -> bool {
+        return l < x && x < r && b < y && y < t;
+    };
+
+    const int chunks = std::max(1, std::min(36, static_cast<int>(std::thread::hardware_concurrency())));
+    std::atomic<size_t> nextCursor{0};
+    constexpr size_t CHUNK_SZ = 256u;
+    BoundaryPool::runChunks(chunks, [&](int) {
+        NativeCoarseScratch q;
+        while (true) {
+            size_t lo = nextCursor.fetch_add(CHUNK_SZ, std::memory_order_relaxed);
+            if (lo >= numConns) break;
+            size_t hi = std::min(numConns, lo + CHUNK_SZ);
+            for (size_t i = lo; i < hi; ++i) {
+                uint8_t mode = corrMode[i];
+                if (mode != 1u && mode != 2u) continue;
+                const ConnData& cd = G.conns[i];
+                I32 sx = static_cast<I32>(G.geomHot[cd.src].endTileX);
+                I32 sy = static_cast<I32>(G.geomHot[cd.src].endTileYRaw);
+                I32 tx = static_cast<I32>(G.geomHot[cd.sink].endTileX);
+                I32 ty = static_cast<I32>(G.geomHot[cd.sink].endTileYRaw);
+                if (!inRect(fLeft, fBottom, fRight, fTop, sx, sy)
+                        || !inRect(fLeft, fBottom, fRight, fTop, tx, ty)
+                        || !inRect(cd.origXmin, cd.origYmin, cd.origXmax, cd.origYmax, sx, sy)
+                        || !inRect(cd.origXmin, cd.origYmin, cd.origXmax, cd.origYmax, tx, ty)) {
+                    continue;
+                }
+                if (mode == 1u) {
+                    I32 l = std::max(cd.origXmin, std::min(sx, tx) - 4);
+                    I32 b = std::max(cd.origYmin, std::min(sy, ty) - 4);
+                    I32 r = std::min(cd.origXmax, std::max(sx, tx) + 4);
+                    I32 t = std::min(cd.origYmax, std::max(sy, ty) + 4);
+                    if (!(l == cd.origXmin && b == cd.origYmin && r == cd.origXmax && t == cd.origYmax)) {
+                        G.corrBx0[i] = l;
+                        G.corrBy0[i] = b;
+                        G.corrBx1[i] = r;
+                        G.corrBy1[i] = t;
+                        G.corrBuse[i] = 1u;
+                    }
+                } else {
+                    I32 ax = sx / 4, ay = sy / 4, zx = tx / 4, zy = ty / 4;
+                    I32 left = std::max(fidesFloorDiv4(std::max(cd.origXmin, static_cast<I32>(fLeft)) + 1), std::min(ax, zx) - 32);
+                    I32 bottom = std::max(fidesFloorDiv4(std::max(cd.origYmin, static_cast<I32>(fBottom)) + 1), std::min(ay, zy) - 32);
+                    I32 right = std::min(fidesFloorDiv4(std::min(cd.origXmax, static_cast<I32>(fRight)) - 1), std::max(ax, zx) + 32);
+                    I32 top = std::min(fidesFloorDiv4(std::min(cd.origYmax, static_cast<I32>(fTop)) - 1), std::max(ay, zy) + 32);
+                    I32 w = right - left + 1;
+                    I32 h = top - bottom + 1;
+                    if (w <= 0 || h <= 0 || static_cast<I64>(w) * static_cast<I64>(h) > 200000LL) continue;
+                    I32 start = (ax - left) * h + (ay - bottom);
+                    I32 end = (zx - left) * h + (zy - bottom);
+                    q.begin(w * h);
+                    q.decrease(start, 0, -1);
+                    while (q.sz != 0) {
+                        I32 at = q.removeFirst();
+                        if (at == end) break;
+                        I32 x = at / h, y = at % h, cost = q.distances[at];
+                        I32 col = left + x, row = bottom + y;
+                        if (x != 0) q.relax(at, at - h, cost, weightAt(col - 1, row));
+                        if (y != 0) q.relax(at, at - 1, cost, weightAt(col, row - 1));
+                        if (y + 1 != h) q.relax(at, at + 1, cost, weightAt(col, row + 1));
+                        if (x + 1 != w) q.relax(at, at + h, cost, weightAt(col + 1, row));
+                    }
+                    if (q.dist(end) == std::numeric_limits<I32>::max()) continue;
+                    I32 x0 = zx, y0 = zy, x1 = zx, y1 = zy;
+                    for (I32 at = end;; at = q.previous[at]) {
+                        if (at < 0) break;
+                        I32 x = left + at / h, y = bottom + (at % h);
+                        x0 = std::min(x0, x);
+                        y0 = std::min(y0, y);
+                        x1 = std::max(x1, x);
+                        y1 = std::max(y1, y);
+                        if (at == start) break;
+                    }
+                    I32 tl = std::max(cd.origXmin, (x0 - 1) * 4 - 1);
+                    I32 tb = std::max(cd.origYmin, (y0 - 1) * 4 - 1);
+                    I32 tr = std::min(cd.origXmax, (x1 + 2) * 4);
+                    I32 tt = std::min(cd.origYmax, (y1 + 2) * 4);
+                    I64 tArea = static_cast<I64>(tr - tl - 1) * static_cast<I64>(tt - tb - 1);
+                    I64 bArea = static_cast<I64>(cd.origXmax - cd.origXmin - 1) * static_cast<I64>(cd.origYmax - cd.origYmin - 1);
+                    if (inRect(tl, tb, tr, tt, sx, sy) && inRect(tl, tb, tr, tt, tx, ty) && tArea <= bArea
+                            && !(tl == cd.origXmin && tb == cd.origYmin && tr == cd.origXmax && tt == cd.origYmax)) {
+                        G.corrBx0[i] = tl;
+                        G.corrBy0[i] = tb;
+                        G.corrBx1[i] = tr;
+                        G.corrBy1[i] = tt;
+                        G.corrBuse[i] = 1u;
+                    }
+                }
+            }
+        }
+    });
+    G.corrMode.swap(corrMode);
+    G.corrInit = true;
+}
+
+JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_nativeSeedCrossSlrCorridors(
+        JNIEnv* env, jclass,
+        jintArray jIdx, jint count,
+        jintArray jBx0, jintArray jBy0, jintArray jBx1, jintArray jBy1, jbyteArray jBuse) {
+    if (!G.corrInit || count <= 0) return;
+    std::vector<I32> idx(static_cast<size_t>(count)), bx0(static_cast<size_t>(count)),
+            by0(static_cast<size_t>(count)), bx1(static_cast<size_t>(count)), by1(static_cast<size_t>(count));
+    std::vector<uint8_t> buse(static_cast<size_t>(count));
+    env->GetIntArrayRegion(jIdx, 0, count, idx.data());
+    env->GetIntArrayRegion(jBx0, 0, count, bx0.data());
+    env->GetIntArrayRegion(jBy0, 0, count, by0.data());
+    env->GetIntArrayRegion(jBx1, 0, count, bx1.data());
+    env->GetIntArrayRegion(jBy1, 0, count, by1.data());
+    env->GetByteArrayRegion(jBuse, 0, count, reinterpret_cast<jbyte*>(buse.data()));
+    const size_t n = G.conns.size();
+    for (int k = 0; k < count; ++k) {
+        size_t ci = static_cast<size_t>(idx[k]);
+        if (ci < n && buse[k] != 0u) {
+            G.corrBx0[ci] = bx0[k];
+            G.corrBy0[ci] = by0[k];
+            G.corrBx1[ci] = bx1[k];
+            G.corrBy1[ci] = by1[k];
+            G.corrBuse[ci] = buse[k];
+        }
+    }
+}
+
 JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_nativeRouteRound(
         JNIEnv* env, jclass,
         jint routeIter,
@@ -2024,6 +2704,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         jint wavePopCeiling, jint numThreads,
         jlongArray jOutStats) {
     auto tStarted = std::chrono::steady_clock::now();
+    ensureGpuInitJoined();
     if (!G.ready || activeCount <= 0) {
         jlong zero[12] = {0};
         zero[1] = static_cast<jlong>(G.overusedList.size());
@@ -2037,11 +2718,26 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     std::vector<I32> activeConns(activeCount), bx0(activeCount), by0(activeCount), bx1(activeCount), by1(activeCount);
     std::vector<uint8_t> buse(activeCount);
     env->GetIntArrayRegion(jActiveConns, 0, activeCount, activeConns.data());
-    env->GetIntArrayRegion(jBoxXmin, 0, activeCount, bx0.data());
-    env->GetIntArrayRegion(jBoxYmin, 0, activeCount, by0.data());
-    env->GetIntArrayRegion(jBoxXmax, 0, activeCount, bx1.data());
-    env->GetIntArrayRegion(jBoxYmax, 0, activeCount, by1.data());
-    env->GetByteArrayRegion(jBoxUse, 0, activeCount, reinterpret_cast<jbyte*>(buse.data()));
+    if (jBoxXmin != nullptr && jBoxUse != nullptr) {
+        env->GetIntArrayRegion(jBoxXmin, 0, activeCount, bx0.data());
+        env->GetIntArrayRegion(jBoxYmin, 0, activeCount, by0.data());
+        env->GetIntArrayRegion(jBoxXmax, 0, activeCount, bx1.data());
+        env->GetIntArrayRegion(jBoxYmax, 0, activeCount, by1.data());
+        env->GetByteArrayRegion(jBoxUse, 0, activeCount, reinterpret_cast<jbyte*>(buse.data()));
+    } else if (G.corrInit) {
+        parallelForU32(static_cast<U32>(activeCount), 36, [&](U32 lo, U32 hi) {
+            for (U32 i = lo; i < hi; ++i) {
+                U32 cIdx = static_cast<U32>(activeConns[i]);
+                bx0[i] = G.corrBx0[cIdx];
+                by0[i] = G.corrBy0[cIdx];
+                bx1[i] = G.corrBx1[cIdx];
+                by1[i] = G.corrBy1[cIdx];
+                buse[i] = G.corrBuse[cIdx];
+            }
+        });
+    } else {
+        std::fill(buse.begin(), buse.end(), 0u);
+    }
 
     // PPT P11 bounded 4-step widening: gentle ±4/±8 -> ±10/±20 -> ±22/±44 -> origBox (buse=0)
     auto applyWidenBox = [&](I32 aIdx, uint8_t lvl) {
@@ -2137,7 +2833,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         if (routeIter <= 1 || !G.connRouted[connIdx]) return true;
         const auto& path = G.connPaths[connIdx];
         for (U32 id : path) {
-            if (__atomic_load_n(&G.dyn[id].occ, __ATOMIC_RELAXED) > cap) return true;
+            if (__atomic_load_n(&G.occ[id], __ATOMIC_RELAXED) > cap) return true;
         }
         return false;
     };
@@ -2597,7 +3293,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 if (sl.dispatchSeq < G.commitSeq) {
                     for (size_t i = 1; i + 1 < newLen; ++i) {
                         U32 nid = newPath[i];
-                        if (G.lastCommitSeq[nid] > sl.dispatchSeq && G.dyn[nid].occ >= cap) {
+                        if (G.lastCommitSeq[nid] > sl.dispatchSeq && G.occ[nid] >= cap) {
                             if (G.lastCommitNet[nid] != netId || G.prevOtherSeq[nid] > sl.dispatchSeq) {
                                 conflict = true;
                                 break;
@@ -2821,6 +3517,8 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         if (c.flags & 64u) q.flags |= FG_QF_SINK_CTRL;
         q.sinkBeginX = c.sinkBeginX;
         q.sinkBeginY = c.sinkBeginY;
+        q.sinkEndX = static_cast<I32>(G.geomHot[c.sink].endTileX);
+        q.sinkEndY = static_cast<I32>(G.geomHot[c.sink].endTileYRaw);
         q.sinkTile = c.sinkTile;
         q.sinkType = c.sinkType;
         q.sinkSlr = static_cast<I32>(G.geomCold[c.sink].endSlrRaw);
@@ -2828,6 +3526,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         q.yCenter = c.yCenter;
         q.netSizeF = static_cast<float>(c.netSize);
         q.doubleHpwlF = static_cast<float>(c.doubleHpwl);
+        q.invBiasDenom = 1.0f / (q.netSizeF * q.doubleHpwlF);
         q.budget = curBudget;
         q.sameNetMode = sd.mode;
         q.sameOffset = sd.offset;
@@ -2863,7 +3562,8 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
 
     I64 gpuWideOk = 0;
     auto runGpuPass = [&](const std::vector<I32>& passItems, int curBudget, int passTier,
-                          const std::vector<I32>* cpuOverlapItems = nullptr) {
+                          const std::vector<I32>* cpuOverlapItems = nullptr, bool forceTierB1 = false) {
+        const bool useTierB1 = (passTier >= 2) || forceTierB1;
         if (passItems.empty()) {
             if (cpuOverlapItems && !cpuOverlapItems->empty()) {
                 G.gpuStampWaveEpoch = 0u;
@@ -2973,7 +3673,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         bool devOk[FG_MAX_GPUS]{};
         FidesGpuPinnedWaveBufs devBufs[FG_MAX_GPUS]{};
 
-        const U32 pathCap = (passTier == 1) ? 512u : 8192u;
+        const U32 pathCap = !useTierB1 ? 512u : 8192u;
         const U32 outPathsWords = 8u << 20;
         std::vector<I32> commitNetHead(numNets, -1);
         std::vector<I32> commitNetTail(numNets, -1);
@@ -3000,7 +3700,15 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
 
         U32 targetWave = 512u;
         if (passTier == 1) {
-            targetWave = (G.gpuCount >= 3) ? std::min<U32>(12288u, static_cast<U32>(G.gpuCount) * 3072u) : 8192u;
+            if (useTierB1) {
+                targetWave = (G.gpuCount >= 3) ? 2048u : 1024u;
+            } else if (routeIter == 3) {
+                targetWave = (G.gpuCount >= 3) ? 8192u : 4096u;
+            } else if (routeIter >= 4) {
+                targetWave = (G.gpuCount >= 3) ? 4096u : 2048u;
+            } else {
+                targetWave = (G.gpuCount >= 3) ? std::min<U32>(12288u, static_cast<U32>(G.gpuCount) * 3072u) : 8192u;
+            }
         } else if (passTier == 2) {
             targetWave = (G.gpuCount >= 3 && curItems.size() > 4096u) ? 2048u : 1024u;
         } else {
@@ -3169,26 +3877,34 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             }
             retries.clear();
 
-            if (!hasPrePicked) {
-                if (passTier == 1 && remainingItems <= 64u) {
-                    while (!readyHeap.empty()) {
-                        GpuReadyNet top = readyHeap.top();
-                        readyHeap.pop();
-                        U32 netId = top.netId;
-                        if (!netInHeap[netId] || top.ver != netVer[netId]) continue;
-                        netInHeap[netId] = 0u;
-                        --liveHeapNets;
-                        ++netVer[netId];
-                        while (netItemHead[netId] >= 0) {
-                            I32 aIdx = popNetItem(netId);
-                            --remainingItems;
-                            if (!shouldRouteLive(static_cast<U32>(activeConns[aIdx]))) {
-                                ++skippedLive;
-                            } else {
-                                cpuFallbackItems.push_back(aIdx);
-                            }
+            auto drainReadyToCpuFallback = [&](bool includePicked) {
+                if (includePicked) {
+                    cpuFallbackItems.insert(cpuFallbackItems.end(), pickedActIdx.begin(), pickedActIdx.end());
+                    pickedActIdx.clear();
+                }
+                while (!readyHeap.empty()) {
+                    GpuReadyNet top = readyHeap.top();
+                    readyHeap.pop();
+                    U32 netId = top.netId;
+                    if (!netInHeap[netId] || top.ver != netVer[netId]) continue;
+                    netInHeap[netId] = 0u;
+                    --liveHeapNets;
+                    ++netVer[netId];
+                    while (netItemHead[netId] >= 0) {
+                        I32 aIdx = popNetItem(netId);
+                        --remainingItems;
+                        if (!shouldRouteLive(static_cast<U32>(activeConns[aIdx]))) {
+                            ++skippedLive;
+                        } else {
+                            cpuFallbackItems.push_back(aIdx);
                         }
                     }
+                }
+            };
+
+            if (!hasPrePicked) {
+                if (passTier == 1 && remainingItems <= 64u) {
+                    drainReadyToCpuFallback(false);
                     break;
                 }
 
@@ -3198,6 +3914,20 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 if (pickedActIdx.empty()) continue;
             }
             hasPrePicked = false;
+
+            const U32 maxMidWaves = (routeIter == 3) ? 200u : 128u;
+            if (passTier == 1 && routeIter >= 3
+                    && (pickedActIdx.size() < ((G.gpuCount >= 3) ? 2048u : 1536u)
+                        || pickedActIdx.size() < (targetWave / 2u)
+                        || gpuWaves >= maxMidWaves)) {
+                drainReadyToCpuFallback(true);
+                break;
+            }
+            if (passTier == 3 && tierB1Mode == 0 && gpuWaves >= 1u
+                    && pickedActIdx.size() < 64u && (remainingItems + pickedActIdx.size()) < 96u) {
+                drainReadyToCpuFallback(true);
+                break;
+            }
 
             // Phase 2A-meta: Mode 3 mega slots (1024 cache, 35-core parallel dirty sort/patch & batch upload) & per-GPU query offsets
             auto tMeta0 = std::chrono::steady_clock::now();
@@ -3460,7 +4190,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             wp.rnodeWLWeight = rnodeWLWeight;
             wp.estWlWeight = estWlWeight;
             wp.pccLen = static_cast<U32>(G.pcc.size());
-            if (passTier == 1) {
+            if (!useTierB1) {
                 wp.bucketShift = 18u;
                 wp.popBatch = 32u;
             } else {
@@ -3469,7 +4199,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             }
 
             struct MultiLaunchCtx {
-                int passTier;
+                bool useTierB1;
                 int tierB1Mode;
                 FidesGpuWaveParams wp;
                 const U32* devB;
@@ -3478,13 +4208,16 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 const U32* devOldCursor;
                 U32* devUsedWords;
                 bool* devOk;
-            } mctx{passTier, tierB1Mode, wp, devB, devSameCursor, outPathsWords, devOldCursor, devUsedWords, devOk};
+            } mctx{useTierB1, tierB1Mode, wp, devB, devSameCursor, outPathsWords, devOldCursor, devUsedWords, devOk};
 
             bool launchedPrePick = false;
             I64 preSkippedLive = 0;
             std::vector<I32> preFallbackItems;
             std::thread prePickThread;
-            if (passTier == 1 && remainingItems > targetWave * 2u && liveHeapNets > 0) {
+            const U32 preMaxMidWaves = (routeIter == 3) ? 200u : 128u;
+            if (passTier == 1 && routeIter <= 4
+                    && !(routeIter >= 3 && (gpuWaves + 1u) >= preMaxMidWaves)
+                    && remainingItems > targetWave * 2u && liveHeapNets > 0) {
                 launchedPrePick = true;
                 prePickThread = std::thread([&]() {
                     pickAndLpt(targetWave, preSkippedLive, preFallbackItems);
@@ -3513,7 +4246,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                     c->devOk[d] = true;
                     return;
                 }
-                if (c->passTier == 1) {
+                if (!c->useTierB1) {
                     c->devOk[d] = fidesGpuRunTierADev(d, c->wp, c->devB[d], c->devSameCursor[d],
                                                       c->outPathsWords, c->devOldCursor[d], &c->devUsedWords[d]);
                 } else {
@@ -3658,6 +4391,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                             relaxedQueue.push_back(aIdx);
                             ++relaxedHeavyCount;
                         } else {
+                            G.gpuOverflowed[cIdx] = 1u;
                             cpuFallbackItems.push_back(aIdx);
                             ++gpuFallbacks;
                         }
@@ -3675,6 +4409,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                             if (tierB1Mode < 2) {
                                 wideRetryItems.push_back(aIdx);
                             } else {
+                                G.gpuOverflowed[cIdx] = 1u;
                                 cpuFallbackItems.push_back(aIdx);
                                 ++gpuFallbacks;
                             }
@@ -3769,9 +4504,9 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                             auto& vec = shardSliceDeltas[b * P4_SLICES + s];
                             for (const auto& kv : vec) {
                                 const U32 id = kv.id;
-                                const I32 before = G.dyn[id].occ;
+                                const I32 before = G.occ[id];
                                 const I32 after = before + kv.delta;
-                                __atomic_store_n(&G.dyn[id].occ, after, __ATOMIC_RELEASE);
+                                __atomic_store_n(&G.occ[id], after, __ATOMIC_RELEASE);
                                 if (trackDirty && G.gpuDirtyOccStamp[id] != curDirtyEpoch) {
                                     G.gpuDirtyOccStamp[id] = curDirtyEpoch;
                                     dOut.push_back(id);
@@ -3844,8 +4579,11 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             }
         }
             if (wideRetryItems.empty() || passTier != 3) break;
-            const size_t minWideItems = (G.gpuCount >= 3) ? 16u : ((tierB1Mode == 0) ? 6u : 8u);
+            const size_t minWideItems = (G.gpuCount >= 3) ? 16u : 12u;
             if (tierB1Mode >= 2 || wideRetryItems.size() < minWideItems) {
+                for (I32 wa : wideRetryItems) {
+                    G.gpuOverflowed[static_cast<U32>(activeConns[wa])] = 1u;
+                }
                 cpuFallbackItems.insert(cpuFallbackItems.end(), wideRetryItems.begin(), wideRetryItems.end());
                 gpuFallbacks += static_cast<I64>(wideRetryItems.size());
                 wideRetryItems.clear();
@@ -3866,6 +4604,8 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 std::sort(cpuFallbackItems.begin(), cpuFallbackItems.end(), [&](I32 a, I32 b) {
                     return G.lastPops[activeConns[a]] > G.lastPops[activeConns[b]];
                 });
+            } else if (passTier == 1 && routeIter >= 3 && cpuFallbackItems.size() > 1u) {
+                std::sort(cpuFallbackItems.begin(), cpuFallbackItems.end());
             }
             runDynamicPass(cpuFallbackItems, curBudget, passTier);
         }
@@ -3915,7 +4655,12 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 for (U32 ci = lo; ci < hi; ++ci) {
                     if (inAct[ci] || !G.connRouted[ci]) continue;
                     const ConnData& cd = G.conns[ci];
-                    if (!(cd.flags & 1u) || cd.doubleHpwl <= 0 || cd.netSize > maxNbrNet || G.lastPops[ci] > maxNbrPops) continue;
+                    if (!(cd.flags & 1u) || cd.doubleHpwl <= 0) continue;
+                    const bool allowDirectBlockerNet = (G.overusedList.size() <= 4u && routeIter >= 54);
+                    if (cd.netSize > (allowDirectBlockerNet ? 192 : maxNbrNet)
+                            || G.lastPops[ci] > (allowDirectBlockerNet ? 120000 : maxNbrPops)) {
+                        continue;
+                    }
                     bool boxNear = false;
                     for (const OvCoord& oc : ovCoords) {
                         if (oc.x >= cd.origXmin - nbrDx && oc.x <= cd.origXmax + nbrDx
@@ -3926,8 +4671,14 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                     }
                     if (!boxNear) continue;
                     I32 bestDist = 1000000;
+                    bool hitsOverNode = false;
                     const auto& p = G.connPaths[ci];
                     for (U32 nid : p) {
+                        if (allowDirectBlockerNet && G.overusedPos[nid] >= 0) {
+                            hitsOverNode = true;
+                            bestDist = 0;
+                            break;
+                        }
                         I32 nx = static_cast<I32>(G.geomHot[nid].endTileX);
                         I32 ny = static_cast<I32>(G.geomHot[nid].tileY);
                         for (const OvCoord& oc : ovCoords) {
@@ -3937,6 +4688,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                             }
                         }
                     }
+                    if (!hitsOverNode && (cd.netSize > maxNbrNet || G.lastPops[ci] > maxNbrPops)) continue;
                     if (bestDist < 1000000) {
                         out.push_back(NbrCand{static_cast<I64>(bestDist) * 100000LL + G.lastPops[ci], ci});
                     }
@@ -3969,7 +4721,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 float mh = 0.0f;
                 const auto& p = savedPaths[i];
                 for (size_t j = 1; j + 1 < p.size(); ++j) {
-                    mh = std::max(mh, G.dyn[p[j]].hist);
+                    mh = std::max(mh, G.hist[p[j]]);
                 }
                 itemMaxHist[i] = mh;
                 NetScopeData& sc = G.netScopes[G.conns[connIdx].netId];
@@ -4010,8 +4762,10 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             const bool rUse = isAct ? (buse[idxPos] != 0) : false;
             const int pad0 = (routeIter >= 55) ? (isAct ? 24 : 12) : 0;
             const uint8_t fs = G.tailFailStreak[connIdx];
+            const bool highPopsSkip2M4M = isAct && fs == 0u && routeIter >= 55
+                    && overNow <= 8u && activeCount <= 48 && G.lastPops[connIdx] >= 2500000LL;
             I32 rc = 0;
-            if (!isAct || (fs == 0u && !(microStalled && G.lastTailFbCount > 0))) {
+            if (!isAct || (fs == 0u && !(microStalled && G.lastTailFbCount > 0) && !highPopsSkip2M4M)) {
                 I64 pops = 0;
                 rc = runProbe(connIdx, rx0, ry0, rx1, ry1, rUse,
                               shareWeight, rnodeCostWeight, rnodeWLWeight, estWlWeight,
@@ -4027,14 +4781,21 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                     G.lastPops[connIdx] += pops2;
                 }
             }
-            if (isAct && rc <= 0 && (escNbr || fs >= 1u || microStalled || (routeIter >= 62 && activeCount <= 24))) {
+            if (isAct && rc <= 0 && (escNbr || fs >= 1u || microStalled || highPopsSkip2M4M || (routeIter >= 62 && activeCount <= 24))) {
                 I64 pops3 = 0;
-                if ((routeIter >= 74 || microStalled || (routeIter >= 60 && fs >= 3u) || (routeIter >= 62 && activeCount <= 24))
-                        && unboundedUsedThisRound < maxUnboundedThisRound) {
+                const bool allowUnboundedNow = (routeIter >= 74
+                        || (microStalled && G.microStuckRounds >= 2)
+                        || (routeIter >= 60 && fs >= 3u)
+                        || (routeIter >= 62 && activeCount <= 24));
+                if (allowUnboundedNow && unboundedUsedThisRound < maxUnboundedThisRound) {
                     rc = runProbe(connIdx, rx0, ry0, rx1, ry1, false,
                                   shareWeight, rnodeCostWeight, rnodeWLWeight, estWlWeight,
                                   0, singlePath, pops3, -1);
                     if (pops3 > 4000000LL) ++unboundedUsedThisRound;
+                } else if (microStalled) {
+                    rc = runProbe(connIdx, rx0, ry0, rx1, ry1, false,
+                                  shareWeight, rnodeCostWeight, rnodeWLWeight, estWlWeight,
+                                  8000000, singlePath, pops3, 160);
                 } else if (routeIter >= 57 && fs >= 2u) {
                     rc = runProbe(connIdx, rx0, ry0, rx1, ry1, false,
                                   shareWeight, rnodeCostWeight, rnodeWLWeight, estWlWeight,
@@ -4049,7 +4810,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                                   6000000, singlePath, pops3, 96);
                 }
                 totalPops += pops3;
-                if (fs == 0u) G.lastPops[connIdx] += pops3;
+                if (fs == 0u && !highPopsSkip2M4M) G.lastPops[connIdx] += pops3;
                 else G.lastPops[connIdx] = pops3;
             }
             if (rc > 0) {
@@ -4090,6 +4851,11 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     cpuFastItems.reserve(activeCount);
     gpuPass1Items.reserve(activeCount);
 
+    const bool allowGpuPass1Mid = G.gpuEnabled
+            && ((routeIter == 3 && activeCount >= 50000)
+                || (routeIter == 4 && activeCount >= 100000));
+    const I64 midGpuLpCut = (routeIter == 3) ? ((G.gpuCount >= 3) ? 1024LL : 1536LL) : 2048LL;
+    const I64 pass2PopsCut = 36000LL;
     for (int i = 0; i < activeCount; ++i) {
         U32 connIdx = static_cast<U32>(activeConns[i]);
         I64 lp = G.lastPops[connIdx];
@@ -4098,28 +4864,44 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         if (wavePopCeiling > 0 && (lp > BUDGET_BASE_HEAVY || (wl >= 3 && lp > 98304))) {
             relaxedQueue.push_back(i);
             ++relaxedHeavyCount;
-        } else if (wavePopCeiling > 0 && (lp > 36000 || (wl >= 1 && lp > 16384))) {
+        } else if (wavePopCeiling > 0 && (lp > pass2PopsCut || (wl >= 1 && lp > 16384))) {
             baseHeavyQueue.push_back(i);
             ++baseHeavyCount;
-        } else if (!G.gpuEnabled || routeIter > 2) {
+        } else if (!G.gpuEnabled) {
             cpuFastItems.push_back(i);
-        } else if (routeIter == 1 || activeCount > 1024) {
+        } else if (routeIter <= 2) {
+            if (routeIter == 1 || activeCount > 1024) {
+                gpuPass1Items.push_back(i);
+            } else {
+                if (lp > 0 && lp < 200 && wl == 0 && cd.doubleHpwl <= 12) cpuFastItems.push_back(i);
+                else gpuPass1Items.push_back(i);
+            }
+        } else if (allowGpuPass1Mid && (lp >= midGpuLpCut || wl >= 1u || (lp == 0 && cd.doubleHpwl >= 24))) {
             gpuPass1Items.push_back(i);
         } else {
-            if (lp > 0 && lp < 200 && wl == 0 && cd.doubleHpwl <= 12) cpuFastItems.push_back(i);
-            else gpuPass1Items.push_back(i);
+            cpuFastItems.push_back(i);
         }
+    }
+    if (allowGpuPass1Mid && gpuPass1Items.size() < 8192u && !gpuPass1Items.empty()) {
+        cpuFastItems.insert(cpuFastItems.end(), gpuPass1Items.begin(), gpuPass1Items.end());
+        gpuPass1Items.clear();
+        std::sort(cpuFastItems.begin(), cpuFastItems.end());
     }
 
     auto tP1_0 = std::chrono::steady_clock::now();
-    if (!cpuFastItems.empty()) {
-        runDynamicPass(cpuFastItems, wavePopCeiling, 1);
-    }
-    if (!gpuPass1Items.empty()) {
-        if (G.gpuEnabled && routeIter <= 2) {
+    if (routeIter >= 3) {
+        if (!gpuPass1Items.empty()) {
             runGpuPass(gpuPass1Items, wavePopCeiling, 1);
-        } else {
-            runDynamicPass(gpuPass1Items, wavePopCeiling, 1);
+        }
+        if (!cpuFastItems.empty()) {
+            runDynamicPass(cpuFastItems, wavePopCeiling, 1);
+        }
+    } else {
+        if (!cpuFastItems.empty()) {
+            runDynamicPass(cpuFastItems, wavePopCeiling, 1);
+        }
+        if (!gpuPass1Items.empty()) {
+            runGpuPass(gpuPass1Items, wavePopCeiling, 1);
         }
     }
     p1S = std::chrono::duration<double>(std::chrono::steady_clock::now() - tP1_0).count();
@@ -4144,15 +4926,19 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         p3N = pass3Items.size();
         auto tP3_0 = std::chrono::steady_clock::now();
         if (!pass3Items.empty()) {
-            const size_t minGpuPass3 = (G.gpuCount >= 4) ? 512u : ((G.gpuCount >= 3) ? 384u : 320u);
+            const size_t minGpuPass3 = (G.gpuCount >= 4) ? 512u : 448u;
             if (G.gpuEnabled && pass3Items.size() >= minGpuPass3) {
                 std::vector<U32> netPass3Cnt(numNets, 0u);
                 std::vector<U32> netUltraCnt(numNets, 0u);
+                const I64 ultraPopCut = (G.gpuCount >= 4) ? 4500000LL : 2800000LL;
                 for (I32 aIdx : pass3Items) {
                     U32 cIdx = static_cast<U32>(activeConns[aIdx]);
                     U32 nid = G.conns[cIdx].netId;
                     ++netPass3Cnt[nid];
-                    if (G.lastPops[cIdx] >= 6500000LL) ++netUltraCnt[nid];
+                    if (G.lastPops[cIdx] >= ultraPopCut
+                            || G.gpuOverflowed[cIdx] != 0u) {
+                        ++netUltraCnt[nid];
+                    }
                 }
                 std::vector<uint8_t> bypassNet(numNets, 0u);
                 bool anyBypass = false;
@@ -4224,9 +5010,10 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
 
     I64 totalExcess = 0;
     for (U32 id : G.overusedList) {
-        I32 ov = G.dyn[id].occ - cap;
+        I32 ov = G.occ[id] - cap;
         if (ov > 0) totalExcess += ov;
     }
+    G.lastRoundActive.swap(activeConns);
 
     if (G.gpuEnabled) {
         fprintf(stdout,
@@ -4278,19 +5065,19 @@ JNIEXPORT jint JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     const bool microStuck = (routeIter >= 55 && !G.overusedList.empty() && G.overusedList.size() <= 2u && G.lastTailFbCount == 0);
     if (microStuck) ++G.microStuckRounds;
     else G.microStuckRounds = 0;
-    const float microMult = !microStuck ? 1.0f : ((G.microStuckRounds >= 2) ? 3.0f : 2.0f);
+    const float microMult = !microStuck ? 1.0f : ((G.microStuckRounds >= 2) ? 4.0f : 2.5f);
     if (microStuck) {
         fprintf(stdout, "F4_V68_MICRO_STUCK iter=%d over=%zu streak=%d mult=%.1f\n",
                 routeIter, G.overusedList.size(), G.microStuckRounds, microMult);
         fflush(stdout);
     }
     for (U32 id : G.overusedList) {
-        I32 ov = G.dyn[id].occ - cap;
+        I32 ov = G.occ[id] - cap;
         if (ov > 0) {
-            G.dyn[id].hist += static_cast<float>(ov) * histFactor * microMult;
+            G.hist[id] += static_cast<float>(ov) * histFactor * microMult;
             if (G.gpuEnabled) {
                 histIds.push_back(id);
-                histVals.push_back(G.dyn[id].hist);
+                histVals.push_back(G.hist[id]);
             }
         }
     }
@@ -4330,60 +5117,250 @@ JNIEXPORT jint JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             cd.origXmax += extX;
             cd.origYmin = std::max(-1, cd.origYmin - extY);
             cd.origYmax += extY;
+            if (G.corrInit && idx < G.corrBuse.size() && G.corrBuse[idx] != 0u && (extX != 0 || extY != 0)) {
+                if (idx < G.corrMode.size() && G.corrMode[idx] == 1u) {
+                    I32 sx = static_cast<I32>(G.geomHot[cd.src].endTileX);
+                    I32 sy = static_cast<I32>(G.geomHot[cd.src].endTileYRaw);
+                    I32 tx = static_cast<I32>(G.geomHot[cd.sink].endTileX);
+                    I32 ty = static_cast<I32>(G.geomHot[cd.sink].endTileYRaw);
+                    I32 l = std::max(cd.origXmin, std::min(sx, tx) - 4);
+                    I32 b = std::max(cd.origYmin, std::min(sy, ty) - 4);
+                    I32 r = std::min(cd.origXmax, std::max(sx, tx) + 4);
+                    I32 t = std::min(cd.origYmax, std::max(sy, ty) + 4);
+                    if (l == cd.origXmin && b == cd.origYmin && r == cd.origXmax && t == cd.origYmax) {
+                        G.corrBuse[idx] = 0u;
+                    } else {
+                        G.corrBx0[idx] = l;
+                        G.corrBy0[idx] = b;
+                        G.corrBx1[idx] = r;
+                        G.corrBy1[idx] = t;
+                    }
+                } else {
+                    G.corrBuse[idx] = 0u;
+                }
+            }
         }
     };
 
     if (!G.overusedList.empty()) {
         int chunks = std::max(1, EXEC.numWorkers + 1);
-        U32 step = (numConns + chunks - 1) / chunks;
-        std::vector<std::vector<jint>> chunkNext(chunks);
-        BoundaryPool::runChunks(chunks, [&](int c) {
-            U32 lo = static_cast<U32>(c) * step;
-            U32 hi = std::min(numConns, lo + step);
-            auto& out = chunkNext[c];
-            for (U32 i = lo; i < hi; ++i) {
-                if (!G.connRouted[i]) {
-                    out.push_back(static_cast<jint>(i));
-                    enlargeConnOrigBox(i);
-                    G.consecCongested[i] = (G.consecCongested[i] < 250) ? G.consecCongested[i] + 1 : 250;
-                    promoteWidenFromStreak(i, G.consecCongested[i]);
-                    continue;
+        const bool useSparseHist = (routeIter >= 7 && G.overusedList.size() <= 16384u);
+        if (useSparseHist) {
+            constexpr U32 NB = GraphData::SNAP_BUCKETS;
+            constexpr U32 MASK = NB - 1u;
+            if (!G.snapReady || G.snapDirtyList.size() > 250000u) {
+                std::vector<U32> counts(NB, 0u);
+                U32 stepC = (numConns + static_cast<U32>(chunks) - 1u) / static_cast<U32>(chunks);
+                BoundaryPool::runChunks(chunks, [&](int c) {
+                    U32 lo = static_cast<U32>(c) * stepC;
+                    U32 hi = std::min(numConns, lo + stepC);
+                    for (U32 i = lo; i < hi; ++i) {
+                        if (!G.connRouted[i]) continue;
+                        for (U32 nid : G.connPaths[i]) {
+                            __atomic_fetch_add(&counts[mixId(nid) & MASK], 1u, __ATOMIC_RELAXED);
+                        }
+                    }
+                });
+                G.snapOffsets.resize(static_cast<size_t>(NB) + 1u);
+                U32 tot = 0u;
+                for (U32 b = 0u; b < NB; ++b) {
+                    G.snapOffsets[b] = tot;
+                    tot += counts[b];
                 }
-                bool cong = false;
-                const auto& path = G.connPaths[i];
-                for (U32 id : path) {
-                    if (G.dyn[id].occ > cap) {
-                        cong = true;
-                        out.push_back(static_cast<jint>(i));
-                        enlargeConnOrigBox(i);
-                        break;
+                G.snapOffsets[NB] = tot;
+                std::vector<U32> cursors(G.snapOffsets.begin(), G.snapOffsets.begin() + NB);
+                G.snapEntries.resize(tot);
+                BoundaryPool::runChunks(chunks, [&](int c) {
+                    U32 lo = static_cast<U32>(c) * stepC;
+                    U32 hi = std::min(numConns, lo + stepC);
+                    for (U32 i = lo; i < hi; ++i) {
+                        if (!G.connRouted[i]) continue;
+                        for (U32 nid : G.connPaths[i]) {
+                            U32 b = mixId(nid) & MASK;
+                            U32 pos = __atomic_fetch_add(&cursors[b], 1u, __ATOMIC_RELAXED);
+                            G.snapEntries[pos] = {nid, i};
+                        }
+                    }
+                });
+                G.snapDirtyFlag.assign(numConns, 0u);
+                G.snapDirtyList.clear();
+                for (U32 i = 0u; i < numConns; ++i) {
+                    if (!G.connRouted[i]) {
+                        G.snapDirtyFlag[i] = 1u;
+                        G.snapDirtyList.push_back(i);
                     }
                 }
-                if (cong) {
-                    G.consecCongested[i] = (G.consecCongested[i] < 250) ? G.consecCongested[i] + 1 : 250;
-                    promoteWidenFromStreak(i, G.consecCongested[i]);
-                } else {
-                    if (midOrTail) {
-                        G.consecCongested[i] >>= 1;
-                    } else {
-                        G.consecCongested[i] = 0;
-                        G.connWiden[i] = 0;
+                G.snapCandStamp.assign(numConns, 0u);
+                G.snapCandEpoch = 1u;
+                G.activeStreakFlag.assign(numConns, 0u);
+                G.activeStreakList.clear();
+                for (U32 i = 0u; i < numConns; ++i) {
+                    if (G.consecCongested[i] != 0u) {
+                        G.activeStreakFlag[i] = 1u;
+                        G.activeStreakList.push_back(i);
+                    }
+                }
+                G.snapReady = true;
+            } else {
+                for (I32 a : G.lastRoundActive) {
+                    if (a < 0) continue;
+                    U32 ci = static_cast<U32>(a);
+                    if (ci < numConns && !G.snapDirtyFlag[ci]) {
+                        G.snapDirtyFlag[ci] = 1u;
+                        G.snapDirtyList.push_back(ci);
                     }
                 }
             }
-        });
-        std::vector<size_t> offsets(static_cast<size_t>(chunks) + 1u, 0u);
-        for (int c = 0; c < chunks; ++c) {
-            offsets[c + 1] = offsets[c] + chunkNext[c].size();
-        }
-        nextAct.resize(offsets[chunks]);
-        if (offsets[chunks] > 0u) {
+
+            if (++G.snapCandEpoch == 0u) {
+                std::fill(G.snapCandStamp.begin(), G.snapCandStamp.end(), 0u);
+                G.snapCandEpoch = 1u;
+            }
+            const U32 curEp = G.snapCandEpoch;
+            std::vector<U32> candConns;
+            candConns.reserve(G.snapDirtyList.size() + G.activeStreakList.size() + G.overusedList.size() * 4u);
+            for (U32 ovId : G.overusedList) {
+                U32 b = mixId(ovId) & MASK;
+                U32 s0 = G.snapOffsets[b], s1 = G.snapOffsets[b + 1u];
+                for (U32 p = s0; p < s1; ++p) {
+                    const auto& e = G.snapEntries[p];
+                    if (e.node == ovId && G.snapCandStamp[e.conn] != curEp) {
+                        G.snapCandStamp[e.conn] = curEp;
+                        candConns.push_back(e.conn);
+                    }
+                }
+            }
+            for (U32 ci : G.snapDirtyList) {
+                if (G.snapCandStamp[ci] != curEp) {
+                    G.snapCandStamp[ci] = curEp;
+                    candConns.push_back(ci);
+                }
+            }
+            for (U32 ci : G.activeStreakList) {
+                if (G.snapCandStamp[ci] != curEp) {
+                    G.snapCandStamp[ci] = curEp;
+                    candConns.push_back(ci);
+                }
+            }
+
+            const size_t candN = candConns.size();
+            if (candN > 0u) {
+                std::sort(candConns.begin(), candConns.end());
+                int effChunks = (candN < 4096u) ? 1 : chunks;
+                size_t step = (candN + static_cast<size_t>(effChunks) - 1u) / static_cast<size_t>(effChunks);
+                std::vector<std::vector<jint>> chunkNext(effChunks);
+                BoundaryPool::runChunks(effChunks, [&](int c) {
+                    size_t lo = static_cast<size_t>(c) * step;
+                    size_t hi = std::min(candN, lo + step);
+                    auto& out = chunkNext[c];
+                    for (size_t k = lo; k < hi; ++k) {
+                        U32 i = candConns[k];
+                        if (!G.connRouted[i]) {
+                            out.push_back(static_cast<jint>(i));
+                            enlargeConnOrigBox(i);
+                            G.consecCongested[i] = (G.consecCongested[i] < 250) ? G.consecCongested[i] + 1 : 250;
+                            promoteWidenFromStreak(i, G.consecCongested[i]);
+                            continue;
+                        }
+                        bool cong = false;
+                        const auto& path = G.connPaths[i];
+                        for (U32 id : path) {
+                            if (G.occ[id] > cap) {
+                                cong = true;
+                                out.push_back(static_cast<jint>(i));
+                                enlargeConnOrigBox(i);
+                                break;
+                            }
+                        }
+                        if (cong) {
+                            G.consecCongested[i] = (G.consecCongested[i] < 250) ? G.consecCongested[i] + 1 : 250;
+                            promoteWidenFromStreak(i, G.consecCongested[i]);
+                        } else {
+                            if (midOrTail) {
+                                G.consecCongested[i] >>= 1;
+                            } else {
+                                G.consecCongested[i] = 0;
+                                G.connWiden[i] = 0;
+                            }
+                        }
+                    }
+                });
+                size_t totNext = 0u;
+                for (int c = 0; c < effChunks; ++c) totNext += chunkNext[c].size();
+                nextAct.reserve(totNext);
+                for (int c = 0; c < effChunks; ++c) {
+                    nextAct.insert(nextAct.end(), chunkNext[c].begin(), chunkNext[c].end());
+                }
+                size_t wIdx = 0u;
+                for (size_t rIdx = 0u; rIdx < G.activeStreakList.size(); ++rIdx) {
+                    U32 ci = G.activeStreakList[rIdx];
+                    if (G.consecCongested[ci] != 0u) {
+                        G.activeStreakList[wIdx++] = ci;
+                    } else {
+                        G.activeStreakFlag[ci] = 0u;
+                    }
+                }
+                G.activeStreakList.resize(wIdx);
+                for (jint ji : nextAct) {
+                    U32 ci = static_cast<U32>(ji);
+                    if (G.consecCongested[ci] != 0u && !G.activeStreakFlag[ci]) {
+                        G.activeStreakFlag[ci] = 1u;
+                        G.activeStreakList.push_back(ci);
+                    }
+                }
+            }
+        } else {
+            G.snapReady = false;
+            U32 step = (numConns + chunks - 1) / chunks;
+            std::vector<std::vector<jint>> chunkNext(chunks);
             BoundaryPool::runChunks(chunks, [&](int c) {
-                if (!chunkNext[c].empty()) {
-                    std::memcpy(nextAct.data() + offsets[c], chunkNext[c].data(),
-                                chunkNext[c].size() * sizeof(jint));
+                U32 lo = static_cast<U32>(c) * step;
+                U32 hi = std::min(numConns, lo + step);
+                auto& out = chunkNext[c];
+                for (U32 i = lo; i < hi; ++i) {
+                    if (!G.connRouted[i]) {
+                        out.push_back(static_cast<jint>(i));
+                        enlargeConnOrigBox(i);
+                        G.consecCongested[i] = (G.consecCongested[i] < 250) ? G.consecCongested[i] + 1 : 250;
+                        promoteWidenFromStreak(i, G.consecCongested[i]);
+                        continue;
+                    }
+                    bool cong = false;
+                    const auto& path = G.connPaths[i];
+                    for (U32 id : path) {
+                        if (G.occ[id] > cap) {
+                            cong = true;
+                            out.push_back(static_cast<jint>(i));
+                            enlargeConnOrigBox(i);
+                            break;
+                        }
+                    }
+                    if (cong) {
+                        G.consecCongested[i] = (G.consecCongested[i] < 250) ? G.consecCongested[i] + 1 : 250;
+                        promoteWidenFromStreak(i, G.consecCongested[i]);
+                    } else {
+                        if (midOrTail) {
+                            G.consecCongested[i] >>= 1;
+                        } else {
+                            G.consecCongested[i] = 0;
+                            G.connWiden[i] = 0;
+                        }
+                    }
                 }
             });
+            std::vector<size_t> offsets(static_cast<size_t>(chunks) + 1u, 0u);
+            for (int c = 0; c < chunks; ++c) {
+                offsets[c + 1] = offsets[c] + chunkNext[c].size();
+            }
+            nextAct.resize(offsets[chunks]);
+            if (offsets[chunks] > 0u) {
+                BoundaryPool::runChunks(chunks, [&](int c) {
+                    if (!chunkNext[c].empty()) {
+                        std::memcpy(nextAct.data() + offsets[c], chunkNext[c].data(),
+                                    chunkNext[c].size() * sizeof(jint));
+                    }
+                });
+            }
         }
     } else {
         nextAct.reserve(1024u);
@@ -4429,7 +5406,7 @@ JNIEXPORT jint JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     if (n > 0) {
         env->SetIntArrayRegion(jOutIds, 0, n, reinterpret_cast<const jint*>(G.overusedList.data()));
         std::vector<jfloat> h(n);
-        for (jsize i = 0; i < n; ++i) h[i] = G.dyn[G.overusedList[i]].hist;
+        for (jsize i = 0; i < n; ++i) h[i] = G.hist[G.overusedList[i]];
         env->SetFloatArrayRegion(jOutHist, 0, n, h.data());
     }
     return len;
@@ -4437,6 +5414,7 @@ JNIEXPORT jint JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
 
 JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_nativeShutdownGpu(
         JNIEnv*, jclass) {
+    ensureGpuInitJoined();
     if (G.gpuEnabled) {
         fidesGpuShutdown();
         G.gpuEnabled = false;

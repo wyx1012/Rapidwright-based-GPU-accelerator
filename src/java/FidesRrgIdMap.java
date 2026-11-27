@@ -129,6 +129,25 @@ public final class FidesRrgIdMap implements Closeable {
      * eviction cliff, and no dependence on how local the caller's ids happen to be.
      */
     private final int[] wireOf;
+    private static final int HINT_SHIFT = 11;
+    private final int[] runHint;
+
+    private static int[] buildRunHint(int n, int[] runFirstId, int runCount) {
+        if (n <= 0 || runCount <= 0 || runFirstId == null) {
+            return new int[0];
+        }
+        int hintLen = (n >>> HINT_SHIFT) + 2;
+        int[] hint = new int[hintLen];
+        int r = 0;
+        for (int b = 0; b < hintLen; ++b) {
+            long target = ((long) b) << HINT_SHIFT;
+            while (r + 1 < runCount && (long) runFirstId[r + 1] <= target) {
+                ++r;
+            }
+            hint[b] = r;
+        }
+        return hint;
+    }
 
     private final long scanBytes;
     private final long scanNanos;
@@ -163,9 +182,6 @@ public final class FidesRrgIdMap implements Closeable {
         if (expectedN <= 0) {
             throw new IllegalArgumentException("expectedN " + expectedN);
         }
-        if (expectTileId == null || expectTileId.length < expectedN) {
-            throw new IllegalArgumentException("expectTileId shorter than N=" + expectedN);
-        }
         this.path = path;
         String cacheProp = System.getProperty("fides.v37.idmapCache");
         String buildProp = System.getProperty("fides.v37.buildIdmapCache");
@@ -186,10 +202,14 @@ public final class FidesRrgIdMap implements Closeable {
             this.scanBytes = cached.bytes;
             this.scanNanos = Math.max(1L, System.nanoTime() - cacheT0);
             this.wireOf = cached.wireOf;
+            this.runHint = buildRunHint(this.n, this.runFirstId, this.runCount);
             System.out.printf(Locale.ROOT,
                     "F4_V37_IDMAP_CACHE loaded=true n=%d runs=%d time_s=%.3f%n",
                     this.n, this.runCount, this.scanNanos / 1e9);
             return;
+        }
+        if (expectTileId == null || expectTileId.length < expectedN) {
+            throw new IllegalArgumentException("expectTileId shorter than N=" + expectedN);
         }
         this.raf = new RandomAccessFile(path.toFile(), "r");
         try {
@@ -205,6 +225,7 @@ public final class FidesRrgIdMap implements Closeable {
             this.scanBytes = s.bytes;
             this.scanNanos = System.nanoTime() - t0;
             this.wireOf = s.wireOf;
+            this.runHint = buildRunHint(this.n, this.runFirstId, this.runCount);
             String outCache = (buildProp != null && !buildProp.isEmpty()) ? buildProp : cacheProp;
             if (outCache != null && !outCache.isEmpty()) {
                 writeBinaryCache(Path.of(outCache), path, this.headerLines, this.n,
@@ -522,6 +543,11 @@ public final class FidesRrgIdMap implements Closeable {
         checkId(id);
         int lo = 0;
         int hi = runCount - 1;
+        if (runHint != null && runHint.length > 0) {
+            int b = id >>> HINT_SHIFT;
+            if (b < runHint.length) lo = runHint[b];
+            if (b + 1 < runHint.length) hi = Math.min(hi, runHint[b + 1]);
+        }
         int r = -1;
         while (lo <= hi) {
             int m = (lo + hi) >>> 1;
@@ -720,10 +746,10 @@ public final class FidesRrgIdMap implements Closeable {
                 int[] runTile = readIntArray(ch, runCount);
                 int[] runFirstId = readIntArray(ch, runCount);
                 int[] wireOf = readIntArray(ch, n);
-                if (runFirstId[0] != 0 || expectTileId[n - 1] != runTile[runCount - 1]) return null;
+                if (runFirstId[0] != 0 || (expectTileId != null && expectTileId[n - 1] != runTile[runCount - 1])) return null;
                 for (int r = 0; r < runCount; ++r) {
                     int fid = runFirstId[r];
-                    if (fid < 0 || fid >= n || runTile[r] != expectTileId[fid]) return null;
+                    if (fid < 0 || fid >= n || (expectTileId != null && runTile[r] != expectTileId[fid])) return null;
                     if (r > 0 && (runFirstId[r] <= runFirstId[r - 1] || runTile[r] <= runTile[r - 1])) {
                         return null;
                     }
@@ -760,9 +786,8 @@ public final class FidesRrgIdMap implements Closeable {
             }
             bb.flip();
             int got = chunkBytes / 4;
-            for (int k = 0; k < got; ++k) {
-                out[idx++] = bb.getInt();
-            }
+            bb.asIntBuffer().get(out, idx, got);
+            idx += got;
         }
         return out;
     }

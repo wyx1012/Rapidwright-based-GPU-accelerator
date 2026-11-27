@@ -72,9 +72,33 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
     static void preloadStatic(String rrgPath, String manifestPath) throws IOException {
         if (rrgPath == null || manifestPath == null) return;
         PreloadedStatic cur = v67Preloaded;
-        if (cur != null && cur.matches(rrgPath, manifestPath)) return;
+        if (cur != null && cur.matches(rrgPath, manifestPath) && cur.rrg.nodeType != null) return;
         FidesRrgLoader loadedRrg = FidesRrgLoader.load(Paths.get(rrgPath));
         FidesRrgIdMap loadedMap = FidesRrgIdMap.open(Paths.get(manifestPath), loadedRrg);
+        v67Preloaded = new PreloadedStatic(rrgPath, manifestPath, loadedRrg, loadedMap);
+    }
+
+    static void preloadStaticSlim(String rrgPath, String manifestPath, int pinfeedOrd) throws IOException {
+        if (rrgPath == null || manifestPath == null) return;
+        PreloadedStatic cur = v67Preloaded;
+        if (cur != null && cur.matches(rrgPath, manifestPath)) return;
+        FidesRrgLoader loadedRrg = null;
+        FidesRrgIdMap loadedMap = null;
+        String idCache = System.getProperty("fides.v37.idmapCache");
+        if (idCache != null && !idCache.isEmpty() && Files.isRegularFile(Path.of(idCache))) {
+            try {
+                FidesRrgLoader hdrRrg = FidesRrgLoader.loadHeaderAndPcc(Paths.get(rrgPath));
+                loadedMap = FidesRrgIdMap.open(Paths.get(manifestPath), hdrRrg);
+                loadedRrg = hdrRrg;
+            } catch (Throwable ignored) {
+                loadedRrg = null;
+                loadedMap = null;
+            }
+        }
+        if (loadedRrg == null) {
+            loadedRrg = FidesRrgLoader.loadSlim(Paths.get(rrgPath), -1);
+            loadedMap = FidesRrgIdMap.open(Paths.get(manifestPath), loadedRrg);
+        }
         v67Preloaded = new PreloadedStatic(rrgPath, manifestPath, loadedRrg, loadedMap);
     }
 
@@ -423,6 +447,8 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
 
     private boolean f4NativeReady;
     private boolean f4NativeRegistered;
+    private byte[] f4CorrMode;
+    private int[] f4CrossSlrIdx;
     private final java.util.IdentityHashMap<NetWrapper, Integer> f4NetIds =
             new java.util.IdentityHashMap<>(1 << 20);
     private RouteNode[] f4NodeCache;
@@ -477,6 +503,10 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
     }
 
     void f4NativeInit(String workDir, RouteNodeGraph routingGraph, RWRouteConfig cfg) {
+        f4NativeInit(workDir, routingGraph, cfg, -1);
+    }
+
+    void f4NativeInit(String workDir, RouteNodeGraph routingGraph, RWRouteConfig cfg, int expectedConns) {
         if (f4NativeReady || workDir == null || mirror == null || cfg.isTimingDriven() || routingGraph.isVersal) return;
         try {
             String libPath = workDir + "/libfides_cpu.so";
@@ -487,6 +517,7 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
                 return;
             }
             FidesNativeCpu.load(libPath);
+            FidesNativeCpu.nativeSetDesignConnCount(expectedConns);
             var occF = FidesMutableMirror.class.getDeclaredField("occ");
             var histF = FidesMutableMirror.class.getDeclaredField("hist");
             occF.setAccessible(true);
@@ -606,6 +637,7 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
         final int[] nsize = new int[n];
         final int[] dhpwl = new int[n];
         final byte[] flags = new byte[n];
+        final byte[] corrMode = new byte[n];
         final boolean useOrigBox = cfg.isUseBoundingBox();
         final boolean uturn = cfg.isUseUTurnNodes();
         final int cChunk = Math.max(4096, (n + workers * 4 - 1) / (workers * 4));
@@ -648,6 +680,17 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
                     nsize[i] = nw.getConnections().size();
                     dhpwl[i] = dHpwl;
                     flags[i] = fl;
+                    byte cm = 0;
+                    if (useOrigBox && src != null && sink != null && !c.hasAltSinks()) {
+                        if (!c.isCrossSLR()) {
+                            if (src.getTile().getSLR().getId() == sink.getTile().getSLR().getId()) {
+                                cm = (c.getHpwl() >= 16) ? (byte) 2 : (byte) 1;
+                            }
+                        } else {
+                            cm = 3;
+                        }
+                    }
+                    corrMode[i] = cm;
                 }
             }));
         }
@@ -677,6 +720,17 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
         FidesNativeCpu.nativeRegisterConnections(
                 netId, srcId, sinkId, ox0, oy0, ox1, oy1,
                 sbx, sby, stile, stype, nxc, nyc, nsize, dhpwl, flags);
+        this.f4CorrMode = corrMode;
+        int crossCnt = 0;
+        for (int i = 0; i < n; ++i) {
+            if (corrMode[i] == 3) ++crossCnt;
+        }
+        int[] crossIdx = new int[crossCnt];
+        int ci = 0;
+        for (int i = 0; i < n; ++i) {
+            if (corrMode[i] == 3) crossIdx[ci++] = i;
+        }
+        this.f4CrossSlrIdx = crossIdx;
         f4NativeRegistered = true;
         double sec = (System.nanoTime() - t0) / 1e9;
         System.out.printf("FIDES_NATIVE_CPU v37 registered=%d nets=%d init_s=%.2f%n", n, numNets, sec);
@@ -685,6 +739,24 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
 
     void f4NativeUpdatePcc(float[] pcc) {
         if (f4NativeReady) FidesNativeCpu.nativeUpdatePcc(pcc);
+    }
+
+    int[] f4CrossSlrIndices() {
+        return f4CrossSlrIdx;
+    }
+
+    void f4NativeInitCorridors(F1Corridor corridor) {
+        if (!f4NativeReady || f4CorrMode == null || corridor == null) return;
+        FidesNativeCpu.nativeInitCorridorGrid(
+                corridor.fabricLeft(), corridor.fabricBottom(), corridor.fabricRight(), corridor.fabricTop(),
+                corridor.coarseLeft(), corridor.coarseBottom(), corridor.coarseHeight(),
+                corridor.coarseOccupancy(), f4CorrMode);
+        f4CorrMode = null;
+    }
+
+    void f4NativeSeedCrossSlrCorridors(int[] crossIdx, int count, int[] bx0, int[] by0, int[] bx1, int[] by1, byte[] buse) {
+        if (!f4NativeReady || count <= 0) return;
+        FidesNativeCpu.nativeSeedCrossSlrCorridors(crossIdx, count, bx0, by0, bx1, by1, buse);
     }
 
     void f4NativeRouteRound(int routeIter, int[] activeConns, int activeCount,
@@ -1251,10 +1323,17 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
             }
         }
         long artifactPinfeed = 0;
-        for (int i = 0; i < rrg.N; i++) {
-            if (rrg.intentCode[i] == IntentCode.NODE_PINFEED.ordinal()) {
-                artifactPinfeed++;
+        if (rrg.slimPinfeedCount >= 0L) {
+            artifactPinfeed = rrg.slimPinfeedCount;
+        } else if (rrg.intentCode != null) {
+            int pfOrd = IntentCode.NODE_PINFEED.ordinal();
+            for (int i = 0; i < rrg.N; i++) {
+                if (rrg.intentCode[i] == pfOrd) {
+                    artifactPinfeed++;
+                }
             }
+        } else {
+            artifactPinfeed = -1L;
         }
         /* Not a criterion and not comparable.  The two numbers count NODE_PINFEED at two different
          * moments in the graph's life: the .bin was measured after the forced full expansion, while

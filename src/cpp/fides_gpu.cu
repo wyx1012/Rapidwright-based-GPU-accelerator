@@ -91,6 +91,7 @@ struct GpuGraphDevice {
     U32 n;
     const U32* offset;
     const U32* edge;
+    const uint8_t* coreDeg;
     const FidesGpuNodeHot* hot;
     const FidesGpuDynNode* dyn;
 };
@@ -158,6 +159,7 @@ struct GpuState {
 
     U32* d_offset = nullptr;
     U32* d_edge = nullptr;
+    uint8_t* d_coreDeg = nullptr;
     FidesGpuNodeHot* d_hot = nullptr;
     FidesGpuDynNode* d_dyn = nullptr;
 
@@ -632,17 +634,17 @@ __device__ __forceinline__ bool d_computeCost(
     float distToCenter = fabsf(static_cast<float>(childX) - q.xCenter)
                        + fabsf(static_cast<float>(childY) - q.yCenter);
     float bc = cg.baseCost;
-    float bias = bc / q.netSizeF * distToCenter / q.doubleHpwlF;
-    float sharing = (sameUses == 0) ? 1.0f : (1.0f + wp.shareWeight * static_cast<float>(sameUses));
+    float bias = bc * distToCenter * q.invBiasDenom;
+    float invSharing = (sameUses == 0) ? 1.0f : (1.0f / (1.0f + wp.shareWeight * static_cast<float>(sameUses)));
     float rawNc = bc * histVal * pccCost;
-    float nc = (sameUses == 0) ? rawNc : (rawNc / sharing);
+    float nc = (sameUses == 0) ? rawNc : (rawNc * invSharing);
     float nodeCost = nc + fides_minJdk(bias, nc * 0.5f);
 
     float newPartial = uUpstream + wp.rnodeCostWeight * nodeCost;
     int len = hotLength(cg);
     newPartial += (sameUses == 0)
             ? (wp.rnodeWLWeight * static_cast<float>(len))
-            : (wp.rnodeWLWeight * static_cast<float>(len) / sharing);
+            : (wp.rnodeWLWeight * static_cast<float>(len) * invSharing);
 
     int deltaX = fides_absInt(childX - q.sinkBeginX);
     int deltaY = fides_absInt(childY - q.sinkBeginY);
@@ -682,7 +684,7 @@ __device__ __forceinline__ bool d_computeCost(
     int distToSink = deltaX + deltaY;
     float newTotal = (sameUses == 0)
             ? (newPartial + wp.estWlWeight * static_cast<float>(distToSink))
-            : (newPartial + wp.estWlWeight * static_cast<float>(distToSink) / sharing);
+            : (newPartial + wp.estWlWeight * static_cast<float>(distToSink) * invSharing);
 
     outPartial = newPartial;
     outTotal = newTotal;
@@ -1034,8 +1036,21 @@ kTierAWarpSearch(
                     S.popNodes[rank] = uCand;
                     S.popG[rank] = myG;
                     S.popPrev[rank] = myPrev;
-                    S.edgeStart[rank] = __ldg(G.offset + uCand);
-                    S.edgeEnd[rank] = __ldg(G.offset + uCand + 1u);
+                    U32 e0 = __ldg(G.offset + uCand);
+                    U32 e1 = __ldg(G.offset + uCand + 1u);
+                    if (G.coreDeg != nullptr) {
+                        uint8_t cd = __ldg(G.coreDeg + uCand);
+                        if (cd < 255u && (e0 + static_cast<U32>(cd) < e1)) {
+                            FidesGpuNodeHot ugh = loadHot(G.hot, uCand);
+                            int ux = hotEndX(ugh);
+                            int uy = hotEndYRaw(ugh);
+                            bool needSeg1 = (ux == q.sinkEndX && fides_absInt(uy - q.sinkEndY) <= 3)
+                                         || (ux == q.sinkBeginX && fides_absInt(uy - q.sinkBeginY) <= 2);
+                            if (!needSeg1) e1 = e0 + static_cast<U32>(cd);
+                        }
+                    }
+                    S.edgeStart[rank] = e0;
+                    S.edgeEnd[rank] = e1;
                 }
             }
             if (lane == 0) {
@@ -1534,8 +1549,21 @@ kTierBCtaSearch(
                             s_popNodes[pos] = uCand;
                             s_popG[pos] = myG;
                             s_popPrev[pos] = myPrev;
-                            s_edgeStart[pos] = __ldg(G.offset + uCand);
-                            s_edgeEnd[pos] = __ldg(G.offset + uCand + 1u);
+                            U32 e0 = __ldg(G.offset + uCand);
+                            U32 e1 = __ldg(G.offset + uCand + 1u);
+                            if (G.coreDeg != nullptr) {
+                                uint8_t cd = __ldg(G.coreDeg + uCand);
+                                if (cd < 255u && (e0 + static_cast<U32>(cd) < e1)) {
+                                    FidesGpuNodeHot ugh = loadHot(G.hot, uCand);
+                                    int ux = hotEndX(ugh);
+                                    int uy = hotEndYRaw(ugh);
+                                    bool needSeg1 = (ux == q.sinkEndX && fides_absInt(uy - q.sinkEndY) <= 3)
+                                                 || (ux == q.sinkBeginX && fides_absInt(uy - q.sinkBeginY) <= 2);
+                                    if (!needSeg1) e1 = e0 + static_cast<U32>(cd);
+                                }
+                            }
+                            s_edgeStart[pos] = e0;
+                            s_edgeEnd[pos] = e1;
                         }
                     }
                 }
@@ -1974,6 +2002,15 @@ kTierBMegaCoopSearch(
                 int enteringTileId = ((hotPreFlags(pg) & FG_PF_SLL) && uPrev != UINT32_MAX)
                         ? hotTileId(loadHot(G.hot, uPrev)) : -1;
                 U32 e0 = __ldg(G.offset + u), e1 = __ldg(G.offset + u + 1u);
+                if (G.coreDeg != nullptr) {
+                    uint8_t cd = __ldg(G.coreDeg + u);
+                    if (cd < 255u && (e0 + static_cast<U32>(cd) < e1)) {
+                        const int ux = hotEndX(pg), uy = hotEndYRaw(pg);
+                        const bool needSeg1 = (ux == q.sinkEndX && fides_absInt(uy - q.sinkEndY) <= 3)
+                                           || (ux == q.sinkBeginX && fides_absInt(uy - q.sinkBeginY) <= 2);
+                        if (!needSeg1) e1 = e0 + static_cast<U32>(cd);
+                    }
+                }
                 for (U32 e = e0; e < e1; ++e) {
                     U32 child = __ldg(G.edge + e);
                     if (M.state[child] == 2u) continue;
@@ -2179,7 +2216,7 @@ void shutdownDevice(int d) {
     }
     auto freeDev = [](auto*& p) { if (p) { cudaFree(p); p = nullptr; } };
     auto freeHost = [](auto*& p) { if (p) { cudaFreeHost(p); p = nullptr; } };
-    freeDev(GS.d_offset); freeDev(GS.d_edge); freeDev(GS.d_hot); freeDev(GS.d_dyn);
+    freeDev(GS.d_offset); freeDev(GS.d_edge); freeDev(GS.d_coreDeg); freeDev(GS.d_hot); freeDev(GS.d_dyn);
     freeDev(GS.d_taPool); freeDev(GS.d_tbPool); freeDev(GS.d_tmPool);
     freeDev(GS.d_nextQuery); freeDev(GS.d_outPathCursor); freeDev(GS.d_queries); freeDev(GS.d_results);
     freeDev(GS.d_outPaths); freeDev(GS.d_sameKeys); freeDev(GS.d_sameVals); freeDev(GS.d_oldNodes);
@@ -2206,6 +2243,7 @@ bool initDevice(
         int slot,
         uint32_t n, uint32_t m,
         const uint32_t* offset, const uint32_t* edge,
+        const uint8_t* coreDeg,
         const FidesGpuNodeHot* hot, const FidesGpuDynNode* dyn,
         const uint32_t* ord16, int32_t sllLen,
         const int32_t* nextLaguna, const int32_t* prevLaguna, int32_t lagLen,
@@ -2227,12 +2265,16 @@ bool initDevice(
 
     size_t offBytes  = (size_t(n) + 1) * sizeof(U32);
     size_t edgeBytes = size_t(m) * sizeof(U32);
+    size_t coreBytes = (coreDeg != nullptr) ? (size_t(n) * sizeof(uint8_t)) : 0u;
     size_t hotBytes  = size_t(n) * sizeof(FidesGpuNodeHot);
     size_t dynBytes  = size_t(n) * sizeof(FidesGpuDynNode);
-    size_t residentBytes = offBytes + edgeBytes + hotBytes + dynBytes;
+    size_t residentBytes = offBytes + edgeBytes + coreBytes + hotBytes + dynBytes;
 
     if (!checkCuda(cudaMalloc(&GS.d_offset, offBytes), "malloc d_offset")) { shutdownDevice(slot); return false; }
     if (!checkCuda(cudaMalloc(&GS.d_edge, edgeBytes), "malloc d_edge")) { shutdownDevice(slot); return false; }
+    if (coreBytes > 0u) {
+        if (!checkCuda(cudaMalloc(&GS.d_coreDeg, coreBytes), "malloc d_coreDeg")) { shutdownDevice(slot); return false; }
+    }
     if (!checkCuda(cudaMalloc(&GS.d_hot, hotBytes), "malloc d_hot")) { shutdownDevice(slot); return false; }
     if (!checkCuda(cudaMalloc(&GS.d_dyn, dynBytes), "malloc d_dyn")) { shutdownDevice(slot); return false; }
     if (!checkCuda(cudaMalloc(&GS.d_nextQuery, sizeof(U32)), "malloc d_nextQuery")) { shutdownDevice(slot); return false; }
@@ -2241,6 +2283,9 @@ bool initDevice(
 
     if (!checkCuda(cudaMemcpyAsync(GS.d_offset, offset, offBytes, cudaMemcpyHostToDevice, GS.stream), "H2D offset")) { shutdownDevice(slot); return false; }
     if (!checkCuda(cudaMemcpyAsync(GS.d_edge, edge, edgeBytes, cudaMemcpyHostToDevice, GS.stream), "H2D edge")) { shutdownDevice(slot); return false; }
+    if (coreBytes > 0u) {
+        if (!checkCuda(cudaMemcpyAsync(GS.d_coreDeg, coreDeg, coreBytes, cudaMemcpyHostToDevice, GS.stream), "H2D coreDeg")) { shutdownDevice(slot); return false; }
+    }
     if (!checkCuda(cudaMemcpyAsync(GS.d_hot, hot, hotBytes, cudaMemcpyHostToDevice, GS.stream), "H2D hot")) { shutdownDevice(slot); return false; }
     if (!checkCuda(cudaMemcpyAsync(GS.d_dyn, dyn, dynBytes, cudaMemcpyHostToDevice, GS.stream), "H2D dyn")) { shutdownDevice(slot); return false; }
 
@@ -2345,6 +2390,7 @@ bool initDevice(
 bool fidesGpuInitMulti(
         uint32_t n, uint32_t m,
         const uint32_t* offset, const uint32_t* edge,
+        const uint8_t* coreDeg,
         const FidesGpuNodeHot* hot, const FidesGpuDynNode* dyn,
         const uint32_t* ord16,
         int32_t sllLen,
@@ -2380,6 +2426,7 @@ bool fidesGpuInitMulti(
     struct InitCtx {
         uint32_t n, m;
         const uint32_t* offset; const uint32_t* edge;
+        const uint8_t* coreDeg;
         const FidesGpuNodeHot* hot; const FidesGpuDynNode* dyn;
         const uint32_t* ord16; int32_t sllLen;
         const int32_t* nextLaguna; const int32_t* prevLaguna; int32_t lagLen;
@@ -2387,12 +2434,12 @@ bool fidesGpuInitMulti(
         int totalSlots;
         bool ok[FG_MAX_GPUS]{};
         FidesGpuInitInfo info[FG_MAX_GPUS]{};
-    } ctx{n, m, offset, edge, hot, dyn, ord16, sllLen, nextLaguna, prevLaguna, lagLen, pcc, pccLen, g_numGpus};
+    } ctx{n, m, offset, edge, coreDeg, hot, dyn, ord16, sllLen, nextLaguna, prevLaguna, lagLen, pcc, pccLen, g_numGpus};
 
     if (g_numGpus > 1) g_gpuPool.start(FG_MAX_GPUS);
     g_gpuPool.run([](int d, void* u) {
         auto* c = static_cast<InitCtx*>(u);
-        c->ok[d] = initDevice(d, c->n, c->m, c->offset, c->edge, c->hot, c->dyn,
+        c->ok[d] = initDevice(d, c->n, c->m, c->offset, c->edge, c->coreDeg, c->hot, c->dyn,
                               c->ord16, c->sllLen, c->nextLaguna, c->prevLaguna, c->lagLen,
                               c->pcc, c->pccLen, c->totalSlots, &c->info[d]);
     }, &ctx);
@@ -2419,6 +2466,7 @@ bool fidesGpuInitMulti(
 bool fidesGpuInit(
         uint32_t n, uint32_t m,
         const uint32_t* offset, const uint32_t* edge,
+        const uint8_t* coreDeg,
         const FidesGpuNodeHot* hot, const FidesGpuDynNode* dyn,
         const uint32_t* ord16,
         int32_t sllLen,
@@ -2426,7 +2474,7 @@ bool fidesGpuInit(
         const float* pcc, int32_t pccLen,
         FidesGpuInitInfo* outInfo) {
     FidesGpuMultiInitInfo mi{};
-    bool ok = fidesGpuInitMulti(n, m, offset, edge, hot, dyn, ord16, sllLen,
+    bool ok = fidesGpuInitMulti(n, m, offset, edge, coreDeg, hot, dyn, ord16, sllLen,
                                 nextLaguna, prevLaguna, lagLen, pcc, pccLen, 1, &mi);
     if (ok && outInfo) *outInfo = mi.cards[0];
     return ok;
@@ -2683,7 +2731,7 @@ bool fidesGpuRunTierADev(
     checkCuda(cudaMemsetAsync(GS.d_nextQuery, 0, sizeof(U32), GS.stream), "TAD reset nextQuery");
     checkCuda(cudaMemsetAsync(GS.d_outPathCursor, 0, sizeof(U32), GS.stream), "TAD reset cursor");
 
-    GpuGraphDevice gd{GS.n, GS.d_offset, GS.d_edge, GS.d_hot, GS.d_dyn};
+    GpuGraphDevice gd{GS.n, GS.d_offset, GS.d_edge, GS.d_coreDeg, GS.d_hot, GS.d_dyn};
     U32 activeWarps = std::min<U32>(GS.taWarps, numQueries);
     U32 blocks = (activeWarps + TA_WARPS_PER_BLOCK - 1u) / TA_WARPS_PER_BLOCK;
     kTierAWarpSearch<<<blocks, TA_WARPS_PER_BLOCK * 32, 0, GS.stream>>>(
@@ -2756,7 +2804,7 @@ bool fidesGpuRunTierB1WideDev(
     checkCuda(cudaMemsetAsync(GS.d_nextQuery, 0, sizeof(U32), GS.stream), "TB1D reset nextQuery");
     checkCuda(cudaMemsetAsync(GS.d_outPathCursor, 0, sizeof(U32), GS.stream), "TB1D reset cursor");
 
-    GpuGraphDevice gd{GS.n, GS.d_offset, GS.d_edge, GS.d_hot, GS.d_dyn};
+    GpuGraphDevice gd{GS.n, GS.d_offset, GS.d_edge, GS.d_coreDeg, GS.d_hot, GS.d_dyn};
     U32 blocks = std::min<U32>(modeCtas, numQueries);
     kTierBCtaSearch<<<blocks, TB_THREADS, 0, GS.stream>>>(
             gd, GS.d_tbPool, cfg, modeCtas,
@@ -2860,7 +2908,7 @@ bool fidesGpuRunTierB2Direct(
     GpuState& GS = GS_ARR[0];
     cudaSetDevice(GS.cudaDev);
     if (!ensureWaveBuffersDev(0, numQueries, sameLen, outPathsCap, oldNodesLen)) return false;
-    GpuGraphDevice gd{GS.n, GS.d_offset, GS.d_edge, GS.d_hot, GS.d_dyn};
+    GpuGraphDevice gd{GS.n, GS.d_offset, GS.d_edge, GS.d_coreDeg, GS.d_hot, GS.d_dyn};
     dim3 gridDim(GS.tmGridBlocks);
     dim3 blockDim(256);
     FidesGpuWaveParams wpArg = wp;

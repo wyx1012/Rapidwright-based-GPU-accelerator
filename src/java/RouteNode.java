@@ -1062,9 +1062,10 @@ public class RouteNode extends Node implements Comparable<RouteNode> {
     public void incrementUser(NetWrapper user) {
         requireNoReadOnlyReplay("add congestion user");
         if (usersConnectionCounts == null) {
-            usersConnectionCounts = new IdentityHashMap<>();
+            usersConnectionCounts = new IdentityHashMap<>(2);
         }
-        usersConnectionCounts.merge(user, 1, Integer::sum);
+        Integer prev = usersConnectionCounts.get(user);
+        usersConnectionCounts.put(user, (prev == null) ? 1 : (prev + 1));
     }
 
     /**

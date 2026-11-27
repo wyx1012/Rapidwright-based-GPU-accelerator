@@ -10,6 +10,8 @@ final class FidesNativeCpu {
         }
     }
 
+    static native void nativeSetDesignConnCount(int connCount);
+
     static native boolean nativeInit(
             String rrgPath,
             String layoutPath,
@@ -55,6 +57,28 @@ final class FidesNativeCpu {
             int[] netSize,
             int[] doubleHpwl,
             byte[] flags);
+
+    static native int[] nativeExportPortals(int[] slrMin, int[] slrMax);
+
+    static native void nativeInitCorridorGrid(
+            int fabricLeft,
+            int fabricBottom,
+            int fabricRight,
+            int fabricTop,
+            int coarseLeft,
+            int coarseBottom,
+            int coarseHeight,
+            int[] coarseOccupancy,
+            byte[] connCorrMode);
+
+    static native void nativeSeedCrossSlrCorridors(
+            int[] crossIdx,
+            int count,
+            int[] bx0,
+            int[] by0,
+            int[] bx1,
+            int[] by1,
+            byte[] buse);
 
     static native void nativeRouteRound(
             int routeIter,

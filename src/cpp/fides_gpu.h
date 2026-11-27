@@ -53,10 +53,11 @@ struct alignas(16) FidesGpuQuery {
     int32_t  xmin, ymin, xmax, ymax;
     int32_t  origXmin, origXmax;
     int32_t  sinkBeginX, sinkBeginY, sinkTile, sinkType;
+    int32_t  sinkEndX, sinkEndY;
     int32_t  sinkSlr;
     uint32_t flags;
     float    xCenter, yCenter;
-    float    netSizeF, doubleHpwlF;
+    float    netSizeF, doubleHpwlF, invBiasDenom;
     int32_t  budget;          // <= 0 means unlimited
     uint32_t sameNetMode;     // 0=empty, 1=smallList+bloom, 2=waveHash, 3=cachedMegaHash
     uint64_t sameBloom64;
@@ -112,6 +113,7 @@ struct FidesGpuMultiInitInfo {
 bool fidesGpuInitMulti(
     uint32_t n, uint32_t m,
     const uint32_t* offset, const uint32_t* edge,
+    const uint8_t* coreDeg,
     const FidesGpuNodeHot* hot, const FidesGpuDynNode* dyn,
     const uint32_t* ord16,
     int32_t sllLen,
@@ -125,6 +127,7 @@ int fidesGpuGetNumGpus();
 bool fidesGpuInit(
     uint32_t n, uint32_t m,
     const uint32_t* offset, const uint32_t* edge,
+    const uint8_t* coreDeg,
     const FidesGpuNodeHot* hot, const FidesGpuDynNode* dyn,
     const uint32_t* ord16,
     int32_t sllLen,
