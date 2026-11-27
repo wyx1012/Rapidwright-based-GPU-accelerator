@@ -20,6 +20,7 @@ Due to co-resident workloads occupying GPUs `[0, 1]` on `gpu02`, **`v94` ran all
 
 - **PPT-Style Technical Report (`v94`)**: [docs/v94_ppt_report.md](docs/v94_ppt_report.md)
 - **Detailed 13-Case Benchmark Sheet (`v94`)**: [docs/v94_all13_benchmark.md](docs/v94_all13_benchmark.md) & [results/v94_all13/summary.jsonl](results/v94_all13/summary.jsonl)
+- **Design note (not implemented): GPU acceleration with `lutPinSwapping=true`**: [docs/pin_swap_gpu_plan.md](docs/pin_swap_gpu_plan.md)
 - **Experimental `v95` Spatial Isolation Study (`2 × V100`)**: [docs/v95_spatial_benchmark.md](docs/v95_spatial_benchmark.md) & [results/v95_all13/summary.jsonl](results/v95_all13/summary.jsonl) ([v95 plan](docs/v95_optimization_plan.md))
 
 ## Experimental `v95`: Isolated Spatial Region Partitioning (`2 × V100`)

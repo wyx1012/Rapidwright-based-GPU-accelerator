@@ -5131,7 +5131,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
 
     auto runGpuPass = [&](const std::vector<I32>& passItems, int curBudget, int passTier,
                           const std::vector<I32>* cpuOverlapItems = nullptr, bool forceTierB1 = false) {
-        if (G.gpuEnabled && passTier == 1 && routeIter <= 2 && !forceTierB1
+        if (G.gpuEnabled && passTier == 1 && routeIter == 1 && !forceTierB1
                 && passItems.size() >= 32768u && G.gpuCount >= 2) {
             const size_t nPass = passItems.size();
             struct ItemBBox {
@@ -5223,6 +5223,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 char bestAxis = 'X';
                 I32 bestLo = 0, bestHi = 0;
                 I32 bestCrossLo = 0, bestCrossHi = 0;
+                I64 bestScore = std::numeric_limits<I64>::min();
                 I64 bestMinW = 0, bestW0 = 0, bestW1 = 0;
                 size_t bestC0 = 0, bestC1 = 0;
                 auto evalCuts = [&](char ax, const std::vector<I32>& samples) {
@@ -5234,7 +5235,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                         I32 hi = cut + 1;
                         I32 clo = cut - sllMargin;
                         I32 chi = cut + sllMargin;
-                        I64 w0 = 0, w1 = 0;
+                        I64 w0 = 0, w1 = 0, wb = 0;
                         size_t c0 = 0, c1 = 0;
                         for (size_t k = 0; k < livePos.size(); k += stride) {
                             const ItemBBox& b = ib[livePos[k]];
@@ -5242,15 +5243,19 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                             if (ax == 'X') {
                                 if (b.qx1 <= lo && b.nx1 < lo) { w0 += b.work; ++c0; }
                                 else if (b.qx0 >= hi && b.nx0 > hi) { w1 += b.work; ++c1; }
+                                else wb += b.work;
                             } else {
                                 I32 mlo = b.cross ? clo : lo;
                                 I32 mhi = b.cross ? chi : hi;
                                 if (b.qy1 <= mlo && b.ny1 < mlo) { w0 += b.work; ++c0; }
                                 else if (b.qy0 >= mhi && b.ny0 > mhi) { w1 += b.work; ++c1; }
+                                else wb += b.work;
                             }
                         }
                         I64 mnW = std::min(w0, w1) * static_cast<I64>(stride);
-                        if (mnW > bestMinW) {
+                        I64 sc = (std::min(w0, w1) - wb) * static_cast<I64>(stride);
+                        if (mnW > 0 && sc > bestScore) {
+                            bestScore = sc;
                             bestMinW = mnW;
                             bestAxis = ax;
                             bestLo = lo;

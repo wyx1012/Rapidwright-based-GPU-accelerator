@@ -11,6 +11,7 @@
 - **对象与架构**：基于 AMD/Xilinx `RapidWright` 生态与 `xcvu13p-fhgb2104-2-e` 超大规模 UltraScale+ 器件（`92,497,168` RRG 节点、`391,524,527` 条有向边），面向 `13` 个完整局部已布线（partial-routed）竞赛设计完成详细布线。
 - **算法骨架**：采用经典 **PathFinder 拥塞协商框架**（外层多轮次拥塞迭代更新历史/当前代价；内层对每条间接连接在动态演化的 RRG 上执行带包围盒与跨 SLR 约束的 A\* / Dijkstra 最短路径搜索）。
 - **硬合法性红线**：输出完整 `.dcp` 必须同时通过**进程内 64 分片排他性校验**与**独立冷启动 JVM `F4BaselineDcpCheck` 回读校验**，严格满足 **`unroutedPins = 0` 且 `sharedPipNodes = 0`**，且两侧 verified `PIPs` 数量逐条一致。
+- **引脚交换参数口径（明确声明）**：**`v94` 全套 13 个用例（以及 `v70` / `v76` / `v95`）均统一未启动 LUT 引脚交换（`lutPinSwapping = false`、`lutRoutethru = false`）**；服务器原生 Java 参考同样采用 `lutPinSwapping = false` 同口径对照，而本机 Java CPU 日志中 9 个非 `k_*` 用例默认开启 `lutPinSwapping = true`（线长口径不同，详见 Slide 3 与 Slide 6 说明）。
 
 ### 1.2 优化目标（对应原 PPT P6）
 - **运行时间优先（Runtime-First）**：竞赛评估体系中运行时间占核心主导地位（原 PPT 目标函数为 **80% Runtime + 20% Wirelength**），重点压缩全 13 用例总 **End-to-End（`E2E`）运行时间**（含 `Read DCP`、预加载/前处理、`Route design`、物化写回 `Write EDIF/XDEF/XDC` 与在线合法性核验）。
@@ -27,7 +28,7 @@
 | **主机内存 / 系统** | 多路 Xeon 服务器 | **`376 GiB` DDR4**，Ubuntu `22.04.5 LTS`，`-Xmx256G` | 本地运行日志（`Read/Route/Write` 分项完整记录） | `376 GiB` DDR4，`-Xmx256G` |
 | **GPU 配置与隔离** | `Tesla V100 PCIe`（`16 GiB` 与 `32 GiB` 配置，PPT 多卡） | **仅 `2 × Tesla V100-PCIE-32GB`（GPU `2, 3`，NUMA Node 1 亲和）**；GPU `0, 1` 未参与 | 无 GPU（纯 CPU Java `PartialRouter`） | 无 GPU（纯 CPU Java `PartialRouter`） |
 | **CUDA / 编译环境** | CUDA Toolkit（支持 V100） | Host Driver `580.95.05`（CUDA `13.0` 运行时 + **`/usr/local/cuda-12.3/bin/nvcc -arch=sm_70`**、`g++ -O3 -march=native`） | — | Amazon Corretto JDK `11.0.31` |
-| **布线参数口径** | `--nonTimingDriven`（PPT Slide 15: `T54 = 807.24 s` on `THEIA_50per`；Slide 18: 13 用例 `T54 = 1,657.64 s`） | `--nonTimingDriven`，`lutPinSwapping=false`（13/13 全部统一口径） | `--nonTimingDriven`；其中 9 个非 `k_*` 用例为 `lutPinSwapping=true`，4 个 `k_*` 用例为 `false` | `--nonTimingDriven`，`lutPinSwapping=false`；**仅统计 `Route design` 阶段，不含完整 E2E** |
+| **布线参数口径** | `--nonTimingDriven`（PPT Slide 15: `T54 = 807.24 s` on `THEIA_50per`；Slide 18: 13 用例 `T54 = 1,657.64 s`） | `--nonTimingDriven`，**全 13 用例均未启动 LUT 引脚交换（`lutPinSwapping=false`、`lutRoutethru=false`）** | `--nonTimingDriven`；其中 9 个非 `k_*` 用例开启 `lutPinSwapping=true`，4 个 `k_*` 用例为 `false` | `--nonTimingDriven`，`lutPinSwapping=false`（未启动引脚交换）；**仅统计 `Route design` 阶段，不含完整 E2E** |
 
 ---
 
@@ -47,8 +48,11 @@
 - **后台异步 GPU 特征计算（`F2Prewarm`）**：在主路由前利用空闲 GPU 线程后台批量计算全部连接的几何与拓扑特征（覆盖 `4,952,719` 条连接），将 `F2` 主线程等待压至毫秒级并融入初始化阶段。
 - **动态走廊与排序调度（`F1Corridor` + `HPWL_FIRST`）**：按 `HPWL asc → fanout desc → hashCode` 稳定排序连接顺序，短线与中长线通过 4×4 粗格走廊收紧搜索边界（`THEIA_50per` 注册 `1,440` 个跨 SLR portals），显著压低无谓节点弹出。
 
-### 策略二：常驻全图双卡异构三级分层搜索（对应 PPT P8, P11, P12）
+### 策略二：常驻全图双卡异构三级分层搜索与“细粒度工作块 / 按 Net 分片 / 批波前”（对应 PPT P8, P11, P12）
 - **常驻显存零 IPC 架构**：在 `2 × Tesla V100` 上一次性驻留 `92.50M` 节点 / `391.52M` 边 CSR（双卡总 `taWarps = 2,048`、`tbCtas = 160`、每卡 `arena = 23.31 GiB`，初始化仅 `1.32 s`），经 JNI 直接由 C++ 控制，彻底消除外部进程/文件 IPC。
+- **“细粒度工作块 / 按 Net 分片 / 批波前（Batch Wavefront + LPT）”并行机制**（继承并工程强化 PPT P11–P12 思路）：
+  - **批波前调度（Batch Wavefront）**：按 `HPWL_FIRST` 稳定堆把百万级待布线连接切成有限批量波前（`R1–R2` 每波 `targetWave = 8,192`，`R3/R4` 动态收窄为 `4,096 / 2,048`，`Tier-B1` 为 `1,024`），并由 `prePickThread` 后台异步预拣下一波，使拥塞信息按波快速传播、避免全局冲突爆炸。
+  - **细粒度工作块与按 Net 分片（`pickAndLpt`）**：每波从尽量多互不相同的 `netId` 各拣选 `1` 条连接组成无同网冲突的细粒度工作块（尾盘活跃 net 少时才按 `mpnFill` 分片），再按预估弹出开销降序执行 **LPT（Longest Processing Time）贪心负载均衡**，将整个 `netId` 及其增量共享表（`NetScope` `512` 槽补丁）整网原子派发给当前负载较轻的 GPU，实现双卡无锁高并发且零跨卡同网写冲突（注：`v94` 不切分物理芯片空间区域，空间隔离块为后续 `v95` 工作）。
 - **三级工作负载精准分流 + 异构双向重叠**：
   1. **Tier-A（Warp-per-Connection）**：`2,048` 个 32 线程 Warp 并发搜索 `R1–R2` 及 `Pass 1` 常规连接（`256` 槽位闭散列表，容量 `262,144`）。
   2. **Tier-B1（CTA-per-Connection）**：`160` 个 256 线程 CTA（共 `40,960` 线程）处理中重高扇出连接，配备 `8,388,608` 槽位大散列表。
@@ -124,14 +128,28 @@
 
 ### 7.2 `v94` 相比原答辩 PPT 并行度是否更高？（明确结论与硬件差异对照）
 **明确结论：`v94` 在计算架构、异构协同与全流程流水线上的实际并行度显著高于原答辩 PPT 的做法；与此同时，当前 `gpu02` 实测的物理硬件规模（仅 `2 × V100`、`36` 核 CPU）低于原 PPT 所用的多卡与 `54 / 72` 线程硬件规格。** 具体对照如下：
-1. **GPU 连接内 + 跨连接总线程并发度更高**：原 PPT 围绕 `16 / 32` 路并行迷宫展开；`v94` 在双卡常驻全图上同时启用 **`2,048` 个 Tier-A Warp（`65,536` 并发线程）+ `160` 个 Tier-B1 CTA（`40,960` 并发线程，单 CTA `256` 线程维护 `8M` 槽位闭散列）**，若释放全部 4 张 V100 则可进一步翻倍至 `4,096 Warps + 320 CTAs`。
+1. **GPU 连接内 + 细粒度工作块 / 按 Net 分片 / 批波前并发度更高**：原 PPT（P11–P12）已提出按批波前与工作块划分的思想；`v94` 将 **`pickAndLpt` 批波前 + 按 `netId` 原子分片 LPT 调度 + 增量 `NetScope` 同步** 全面下沉到零 IPC C++/CUDA 热循环，在双卡常驻全图上同时启用 **`2,048` 个 Tier-A Warp（`65,536` 并发线程）+ `160` 个 Tier-B1 CTA（`40,960` 并发线程，单 CTA `256` 线程维护 `8M` 槽位闭散列）**（4 卡可翻倍至 `4,096 Warps + 320 CTAs`），并修复 `hasPrePicked` 旁路消除无效微小波前。
 2. **CPU+GPU 真正异构双向并发（`cpuOverlapThread`）**：不同于“批边界上 GPU 与 CPU 串行切换”的模式，`v94` 在 `Pass 3` 让 CPU `36` 核与双卡 V100 **同轮并行**（CPU 并发吸收 `> 2.8M pops` 超重网，GPU 并发跑中等拥塞连接，并由后台 `prePickThread` 流水线式预选下一波）。
 3. **E2E 全阶段并发流水线更深**：将 `IDMAP_CACHE` 与 `nativePreinitStatic` 藏进 `Design.readCheckpoint`，将 `F2Prewarm` 异步化，并将 `64` 分片并行 `F4BaselineDcpCheck` 合法性校验完全藏入 `writeCheckpoint` 写出周期内。
 4. **物理硬件条件差异（如实声明）**：原 PPT 使用 `2× Xeon Silver 4314` / `4× Xeon Gold 6140`（扩展测试达 `54 / 72` 线程）及多卡 V100；而本次 `v94` 在 `gpu02` 上仅有 `2× Xeon Gold 5220`（`36` 核 / 无超线程），且 GPU `0, 1` 被其他用户占用，**全 13 用例严格隔离运行在 `2 × V100 [2, 3]` 上**。
 
 ---
 
-## Slide 8：总结与下一阶段展望（`v95+`）
+## Slide 7.5（新增）：空间分块隔离 `v95-t6` 与 `v94` 实测对比（未开展 LUT 引脚交换口径）
+
+> **对比口径严格声明**：以下 `v95-t6` 与 `v94` 两组全 13 用例实验 **均在未启动 LUT 引脚交换（`lutPinSwapping = false`、`lutRoutethru = false`、`--nonTimingDriven`）条件下运行**，仅对比“物理芯片空间区域切分隔离（`v95-t6`，`gpu02 --gpus 1,3` 跨 NUMA 双卡）”与“非空间切分全图批波前 LPT（`v94`，`gpu02 --gpus 2,3` 同 NUMA 双卡）”的性能与合法性差异。
+
+1. **总体成绩对比（全 13 用例 `13 / 13` 进程内 + 冷 JVM 双重 PASS，`unroutedPins=0, sharedPipNodes=0`）**：
+   - **`v94`（不切空间，批波前 + 按 Net LPT）**：总 E2E = **`1,814.86 s`**，总 `Route design` = **`1,298.34 s`**，总 WL = `46,586,873`。
+   - **`v95-t6`（仅 R1 做 Layer-1 物理空间二分区 `reg0 || reg1` 后处理 `bound`）**：总 E2E = **`1,951.57 s`**，总 `Route design` = **`1,461.68 s`**，总 WL = `46,719,853`。
+   - 对比含 `4 × V100` 的历史里程碑 `v76`（`2,092.91 s`），`v95-t6` 仅凭统一 `2 × V100` 编译版本实现 **`-141.34 s`** 领先。
+2. **逐设计分化特征（`9 / 13` 用例 E2E 反超 `v94`，大型高跨区设计受制于边界连接与跨 SLR 分布）**：
+   - **空间切分显著收益项（`v95-t6` 优于 `v94`）**：`THEIA_jpeg` E2E **`111.08 s` vs `135.68 s`（`-24.60 s / -18.1%`，41 轮降至 21 轮）**、`k_140000fd_500000lut` **`53.72 s` vs `60.64 s`（`-6.92 s`）**、`k_800_ram` **`156.85 s` vs `163.13 s`（`-6.28 s`）**、`THEIA` **`139.64 s` vs `142.46 s`（`-2.82 s`）**，且全部 `5` 个小用例（`<32k` 跳过分块、保留了通用 I/O 收益）均快于 `v94`。
+   - **差距来源项**：`THEIA_20per`（`433.57 s` vs `347.95 s`，`+85.62 s`：`Y=[447,449]` 存在 `99,737` 条跨边界连接先走后推，总收敛轮数增至 `66` vs `50` 轮）与 `THEIA_50per`（`836.64 s` vs `723.85 s`，`+112.79 s`：4-SLR 结构下触发 `F4_V95_SPLIT_SKIP` 回退原路径，且 `v95-t6` 运行在跨 NUMA `--gpus 1,3` 链路而 `v94` 运行在同 NUMA `--gpus 2,3`）。
+
+---
+
+## Slide 8：总结与下一阶段展望（`v95+ / v96`）
 
 - **`v94` 已兑现里程碑**：在仅有 **`2 × Tesla V100`** 的实际隔离条件下，实现全 13 用例 **`1,814.86 s`（`30.25 min`）**、100% 双校验合法通过，对比本机 Java CPU 基线提升 **`25.08×`**，超越 `4 × V100` 参与的 `v76` 历史最优记录 **`-278.05 s`**。
 - **`v95` 重点冲刺方向**（详见 [v95_optimization_plan.md](v95_optimization_plan.md)）：
