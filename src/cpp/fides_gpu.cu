@@ -2522,21 +2522,27 @@ void fidesGpuSyncDynFull(const FidesGpuDynNode* dyn, uint32_t n) {
     }, &ctx);
 }
 
+bool fidesGpuApplyOccDeltasDev(int dev, const uint32_t* nodeIds, const int32_t* newOccs, uint32_t count) {
+    if (dev < 0 || dev >= g_numGpus) return false;
+    if (count == 0u) return GS_ARR[dev].ready;
+    GpuState& GS = GS_ARR[dev];
+    if (!GS.ready) return false;
+    cudaSetDevice(GS.cudaDev);
+    if (!ensureDeltaBuffersDev(dev, count)) return false;
+    std::memcpy(GS.h_deltaIdsPinned, nodeIds, size_t(count) * sizeof(U32));
+    std::memcpy(GS.h_deltaOccPinned, newOccs, size_t(count) * sizeof(I32));
+    checkCuda(cudaMemcpyAsync(GS.d_deltaIds, GS.h_deltaIdsPinned, size_t(count) * sizeof(U32), cudaMemcpyHostToDevice, GS.stream), "H2D deltaIdsDev");
+    checkCuda(cudaMemcpyAsync(GS.d_deltaOcc, GS.h_deltaOccPinned, size_t(count) * sizeof(I32), cudaMemcpyHostToDevice, GS.stream), "H2D deltaOccDev");
+    kApplyOccDeltas<<<(count + 255u) / 256u, 256, 0, GS.stream>>>(GS.d_dyn, GS.d_deltaIds, GS.d_deltaOcc, count);
+    return checkCuda(cudaGetLastError(), "kApplyOccDeltasDev");
+}
+
 bool fidesGpuApplyOccDeltasMulti(const uint32_t* nodeIds, const int32_t* newOccs, uint32_t count) {
     if (g_numGpus <= 0 || count == 0u) return true;
     struct Ctx { const uint32_t* ids; const int32_t* occs; uint32_t count; bool ok[FG_MAX_GPUS]{}; } ctx{nodeIds, newOccs, count};
     g_gpuPool.run([](int d, void* u) {
         auto* c = static_cast<Ctx*>(u);
-        GpuState& GS = GS_ARR[d];
-        if (!GS.ready) { c->ok[d] = false; return; }
-        cudaSetDevice(GS.cudaDev);
-        if (!ensureDeltaBuffersDev(d, c->count)) { c->ok[d] = false; return; }
-        std::memcpy(GS.h_deltaIdsPinned, c->ids, size_t(c->count) * sizeof(U32));
-        std::memcpy(GS.h_deltaOccPinned, c->occs, size_t(c->count) * sizeof(I32));
-        checkCuda(cudaMemcpyAsync(GS.d_deltaIds, GS.h_deltaIdsPinned, size_t(c->count) * sizeof(U32), cudaMemcpyHostToDevice, GS.stream), "H2D deltaIdsM");
-        checkCuda(cudaMemcpyAsync(GS.d_deltaOcc, GS.h_deltaOccPinned, size_t(c->count) * sizeof(I32), cudaMemcpyHostToDevice, GS.stream), "H2D deltaOccM");
-        kApplyOccDeltas<<<(c->count + 255u) / 256u, 256, 0, GS.stream>>>(GS.d_dyn, GS.d_deltaIds, GS.d_deltaOcc, c->count);
-        c->ok[d] = checkCuda(cudaGetLastError(), "kApplyOccDeltasMulti");
+        c->ok[d] = fidesGpuApplyOccDeltasDev(d, c->ids, c->occs, c->count);
     }, &ctx);
     for (int d = 0; d < g_numGpus; ++d) if (!ctx.ok[d]) return false;
     return true;
@@ -2563,6 +2569,73 @@ void fidesGpuApplyHistDeltas(const uint32_t* nodeIds, const float* newHists, uin
     }, &ctx);
 }
 
+static bool uploadMegaScopesBatchImplDev(int d, const FidesGpuMegaUpload* items, uint32_t count, size_t totalCap) {
+    GpuState& GS = GS_ARR[d];
+    if (!GS.ready) return false;
+    cudaSetDevice(GS.cudaDev);
+    if (GS.megaStageEventRecorded) {
+        cudaEventSynchronize(GS.megaStageEvent);
+        GS.megaStageEventRecorded = false;
+    }
+    bool needSyncForFree = false;
+    for (uint32_t i = 0u; i < count; ++i) {
+        int s = items[i].slot;
+        if (items[i].cap > GS.megaCap[s] && (GS.d_megaKeysHost[s] || GS.d_megaValsHost[s])) {
+            needSyncForFree = true;
+            break;
+        }
+    }
+    if (needSyncForFree) {
+        cudaStreamSynchronize(GS.stream);
+    }
+    if (totalCap > GS.capMegaStage) {
+        size_t nc = std::max<size_t>(totalCap, 4u << 20);
+        if (GS.h_megaStageKeysPinned) cudaFreeHost(GS.h_megaStageKeysPinned);
+        if (GS.h_megaStageValsPinned) cudaFreeHost(GS.h_megaStageValsPinned);
+        GS.h_megaStageKeysPinned = nullptr;
+        GS.h_megaStageValsPinned = nullptr;
+        if (!checkCuda(cudaMallocHost(&GS.h_megaStageKeysPinned, nc * sizeof(U32)), "mallocHost megaStageK")) return false;
+        if (!checkCuda(cudaMallocHost(&GS.h_megaStageValsPinned, nc * sizeof(I32)), "mallocHost megaStageV")) return false;
+        GS.capMegaStage = nc;
+    }
+    size_t off = 0u;
+    for (uint32_t i = 0u; i < count; ++i) {
+        int s = items[i].slot;
+        U32 cap = items[i].cap;
+        if (cap > GS.megaCap[s]) {
+            if (GS.d_megaKeysHost[s]) cudaFree(GS.d_megaKeysHost[s]);
+            if (GS.d_megaValsHost[s]) cudaFree(GS.d_megaValsHost[s]);
+            size_t allocCap = std::max<size_t>(cap, 65536u);
+            if (!checkCuda(cudaMalloc(&GS.d_megaKeysHost[s], allocCap * sizeof(U32)), "malloc megaKeys")) return false;
+            if (!checkCuda(cudaMalloc(&GS.d_megaValsHost[s], allocCap * sizeof(I32)), "malloc megaVals")) return false;
+            GS.megaCap[s] = allocCap;
+            checkCuda(cudaMemcpyToSymbolAsync(c_megaKeys, &GS.d_megaKeysHost[s], sizeof(U32*),
+                                              size_t(s) * sizeof(U32*), cudaMemcpyHostToDevice, GS.stream), "sym megaKey");
+            checkCuda(cudaMemcpyToSymbolAsync(c_megaVals, &GS.d_megaValsHost[s], sizeof(I32*),
+                                              size_t(s) * sizeof(I32*), cudaMemcpyHostToDevice, GS.stream), "sym megaVal");
+        }
+        std::memcpy(GS.h_megaStageKeysPinned + off, items[i].keys, size_t(cap) * sizeof(U32));
+        std::memcpy(GS.h_megaStageValsPinned + off, items[i].counts, size_t(cap) * sizeof(I32));
+        checkCuda(cudaMemcpyAsync(GS.d_megaKeysHost[s], GS.h_megaStageKeysPinned + off, size_t(cap) * sizeof(U32), cudaMemcpyHostToDevice, GS.stream), "H2D megaKeys");
+        checkCuda(cudaMemcpyAsync(GS.d_megaValsHost[s], GS.h_megaStageValsPinned + off, size_t(cap) * sizeof(I32), cudaMemcpyHostToDevice, GS.stream), "H2D megaVals");
+        off += size_t(cap);
+    }
+    checkCuda(cudaEventRecord(GS.megaStageEvent, GS.stream), "record megaStageEvent");
+    GS.megaStageEventRecorded = true;
+    return true;
+}
+
+bool fidesGpuUploadMegaScopesBatchDev(int dev, const FidesGpuMegaUpload* items, uint32_t count) {
+    if (dev < 0 || dev >= g_numGpus) return false;
+    if (count == 0u || !items) return true;
+    size_t totalCap = 0u;
+    for (uint32_t i = 0u; i < count; ++i) {
+        if (items[i].slot < 0 || items[i].slot >= MAX_MEGA_SCOPES || items[i].cap == 0u) return false;
+        totalCap += size_t(items[i].cap);
+    }
+    return uploadMegaScopesBatchImplDev(dev, items, count, totalCap);
+}
+
 bool fidesGpuUploadMegaScopesBatch(const FidesGpuMegaUpload* items, uint32_t count) {
     if (g_numGpus <= 0) return false;
     if (count == 0u || !items) return true;
@@ -2579,59 +2652,7 @@ bool fidesGpuUploadMegaScopesBatch(const FidesGpuMegaUpload* items, uint32_t cou
     } ctx{items, count, totalCap};
     g_gpuPool.run([](int d, void* u) {
         auto* c = static_cast<Ctx*>(u);
-        GpuState& GS = GS_ARR[d];
-        if (!GS.ready) { c->ok[d] = false; return; }
-        cudaSetDevice(GS.cudaDev);
-        if (GS.megaStageEventRecorded) {
-            cudaEventSynchronize(GS.megaStageEvent);
-            GS.megaStageEventRecorded = false;
-        }
-        bool needSyncForFree = false;
-        for (uint32_t i = 0u; i < c->count; ++i) {
-            int s = c->items[i].slot;
-            if (c->items[i].cap > GS.megaCap[s] && (GS.d_megaKeysHost[s] || GS.d_megaValsHost[s])) {
-                needSyncForFree = true;
-                break;
-            }
-        }
-        if (needSyncForFree) {
-            cudaStreamSynchronize(GS.stream);
-        }
-        if (c->totalCap > GS.capMegaStage) {
-            size_t nc = std::max<size_t>(c->totalCap, 4u << 20);
-            if (GS.h_megaStageKeysPinned) cudaFreeHost(GS.h_megaStageKeysPinned);
-            if (GS.h_megaStageValsPinned) cudaFreeHost(GS.h_megaStageValsPinned);
-            GS.h_megaStageKeysPinned = nullptr;
-            GS.h_megaStageValsPinned = nullptr;
-            if (!checkCuda(cudaMallocHost(&GS.h_megaStageKeysPinned, nc * sizeof(U32)), "mallocHost megaStageK")) { c->ok[d] = false; return; }
-            if (!checkCuda(cudaMallocHost(&GS.h_megaStageValsPinned, nc * sizeof(I32)), "mallocHost megaStageV")) { c->ok[d] = false; return; }
-            GS.capMegaStage = nc;
-        }
-        size_t off = 0u;
-        for (uint32_t i = 0u; i < c->count; ++i) {
-            int s = c->items[i].slot;
-            U32 cap = c->items[i].cap;
-            if (cap > GS.megaCap[s]) {
-                if (GS.d_megaKeysHost[s]) cudaFree(GS.d_megaKeysHost[s]);
-                if (GS.d_megaValsHost[s]) cudaFree(GS.d_megaValsHost[s]);
-                size_t allocCap = std::max<size_t>(cap, 65536u);
-                if (!checkCuda(cudaMalloc(&GS.d_megaKeysHost[s], allocCap * sizeof(U32)), "malloc megaKeys")) { c->ok[d] = false; return; }
-                if (!checkCuda(cudaMalloc(&GS.d_megaValsHost[s], allocCap * sizeof(I32)), "malloc megaVals")) { c->ok[d] = false; return; }
-                GS.megaCap[s] = allocCap;
-                checkCuda(cudaMemcpyToSymbolAsync(c_megaKeys, &GS.d_megaKeysHost[s], sizeof(U32*),
-                                                  size_t(s) * sizeof(U32*), cudaMemcpyHostToDevice, GS.stream), "sym megaKey");
-                checkCuda(cudaMemcpyToSymbolAsync(c_megaVals, &GS.d_megaValsHost[s], sizeof(I32*),
-                                                  size_t(s) * sizeof(I32*), cudaMemcpyHostToDevice, GS.stream), "sym megaVal");
-            }
-            std::memcpy(GS.h_megaStageKeysPinned + off, c->items[i].keys, size_t(cap) * sizeof(U32));
-            std::memcpy(GS.h_megaStageValsPinned + off, c->items[i].counts, size_t(cap) * sizeof(I32));
-            checkCuda(cudaMemcpyAsync(GS.d_megaKeysHost[s], GS.h_megaStageKeysPinned + off, size_t(cap) * sizeof(U32), cudaMemcpyHostToDevice, GS.stream), "H2D megaKeys");
-            checkCuda(cudaMemcpyAsync(GS.d_megaValsHost[s], GS.h_megaStageValsPinned + off, size_t(cap) * sizeof(I32), cudaMemcpyHostToDevice, GS.stream), "H2D megaVals");
-            off += size_t(cap);
-        }
-        checkCuda(cudaEventRecord(GS.megaStageEvent, GS.stream), "record megaStageEvent");
-        GS.megaStageEventRecorded = true;
-        c->ok[d] = true;
+        c->ok[d] = uploadMegaScopesBatchImplDev(d, c->items, c->count, c->totalCap);
     }, &ctx);
     for (int d = 0; d < g_numGpus; ++d) if (!ctx.ok[d]) return false;
     return true;
@@ -2642,27 +2663,33 @@ int fidesGpuUploadMegaScope(int slot, const uint32_t* keys, const int32_t* count
     return fidesGpuUploadMegaScopesBatch(&one, 1u) ? slot : -1;
 }
 
+bool fidesGpuApplyMegaPatchesDev(int d, const FidesGpuMegaPatch* patches, uint32_t count) {
+    if (d < 0 || d >= g_numGpus) return false;
+    if (count == 0u) return GS_ARR[d].ready;
+    GpuState& GS = GS_ARR[d];
+    if (!GS.ready) return false;
+    cudaSetDevice(GS.cudaDev);
+    if (count > GS.capMegaPatches) {
+        size_t nc = std::max<size_t>(count, 262144u);
+        if (GS.d_megaPatches) cudaFree(GS.d_megaPatches);
+        if (GS.h_megaPatchesPinned) cudaFreeHost(GS.h_megaPatchesPinned);
+        if (!checkCuda(cudaMalloc(&GS.d_megaPatches, nc * sizeof(FidesGpuMegaPatch)), "malloc d_megaPatches")) return false;
+        if (!checkCuda(cudaMallocHost(&GS.h_megaPatchesPinned, nc * sizeof(FidesGpuMegaPatch)), "mallocHost h_megaPatches")) return false;
+        GS.capMegaPatches = nc;
+    }
+    std::memcpy(GS.h_megaPatchesPinned, patches, size_t(count) * sizeof(FidesGpuMegaPatch));
+    checkCuda(cudaMemcpyAsync(GS.d_megaPatches, GS.h_megaPatchesPinned, size_t(count) * sizeof(FidesGpuMegaPatch),
+                              cudaMemcpyHostToDevice, GS.stream), "H2D megaPatches");
+    kApplyMegaPatches<<<(count + 255u) / 256u, 256, 0, GS.stream>>>(GS.d_megaPatches, count);
+    return checkCuda(cudaGetLastError(), "kApplyMegaPatchesDev launch");
+}
+
 bool fidesGpuApplyMegaPatches(const FidesGpuMegaPatch* patches, uint32_t count) {
     if (g_numGpus <= 0 || count == 0u) return true;
     struct Ctx { const FidesGpuMegaPatch* patches; uint32_t count; bool ok[FG_MAX_GPUS]{}; } ctx{patches, count};
     g_gpuPool.run([](int d, void* u) {
         auto* c = static_cast<Ctx*>(u);
-        GpuState& GS = GS_ARR[d];
-        if (!GS.ready) { c->ok[d] = false; return; }
-        cudaSetDevice(GS.cudaDev);
-        if (c->count > GS.capMegaPatches) {
-            size_t nc = std::max<size_t>(c->count, 262144u);
-            if (GS.d_megaPatches) cudaFree(GS.d_megaPatches);
-            if (GS.h_megaPatchesPinned) cudaFreeHost(GS.h_megaPatchesPinned);
-            if (!checkCuda(cudaMalloc(&GS.d_megaPatches, nc * sizeof(FidesGpuMegaPatch)), "malloc d_megaPatches")) { c->ok[d] = false; return; }
-            if (!checkCuda(cudaMallocHost(&GS.h_megaPatchesPinned, nc * sizeof(FidesGpuMegaPatch)), "mallocHost h_megaPatches")) { c->ok[d] = false; return; }
-            GS.capMegaPatches = nc;
-        }
-        std::memcpy(GS.h_megaPatchesPinned, c->patches, size_t(c->count) * sizeof(FidesGpuMegaPatch));
-        checkCuda(cudaMemcpyAsync(GS.d_megaPatches, GS.h_megaPatchesPinned, size_t(c->count) * sizeof(FidesGpuMegaPatch),
-                                  cudaMemcpyHostToDevice, GS.stream), "H2D megaPatches");
-        kApplyMegaPatches<<<(c->count + 255u) / 256u, 256, 0, GS.stream>>>(GS.d_megaPatches, c->count);
-        c->ok[d] = checkCuda(cudaGetLastError(), "kApplyMegaPatches launch");
+        c->ok[d] = fidesGpuApplyMegaPatchesDev(d, c->patches, c->count);
     }, &ctx);
     for (int d = 0; d < g_numGpus; ++d) if (!ctx.ok[d]) return false;
     return true;

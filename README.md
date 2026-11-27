@@ -20,7 +20,14 @@ Due to co-resident workloads occupying GPUs `[0, 1]` on `gpu02`, **`v94` ran all
 
 - **PPT-Style Technical Report (`v94`)**: [docs/v94_ppt_report.md](docs/v94_ppt_report.md)
 - **Detailed 13-Case Benchmark Sheet (`v94`)**: [docs/v94_all13_benchmark.md](docs/v94_all13_benchmark.md) & [results/v94_all13/summary.jsonl](results/v94_all13/summary.jsonl)
-- **Next-Stage Plan (`v95`)**: [docs/v95_optimization_plan.md](docs/v95_optimization_plan.md)
+- **Experimental `v95` Spatial Isolation Study (`2 × V100`)**: [docs/v95_spatial_benchmark.md](docs/v95_spatial_benchmark.md) & [results/v95_all13/summary.jsonl](results/v95_all13/summary.jsonl) ([v95 plan](docs/v95_optimization_plan.md))
+
+## Experimental `v95`: Isolated Spatial Region Partitioning (`2 × V100`)
+
+`v95` extends `v94` by partitioning Round 1–2 `Pass 1` connections into mutually isolated `reg0` and `reg1` spatial regions routed concurrently on separate CUDA streams, `WaveThreadPool` workers, and 512-slot per-region mega-caches before syncing dirty occupancies and routing cross-cut `bound` nets (`F4_V95_SPLIT_SKIP` guard falls back to `v94` LPT if boundary > 25%, e.g., 4-SLR `THEIA_50per`).
+
+- On spatial-isolated benchmarks (`7/7` applicable designs achieved **98%–99.9%** `reg0`/`reg1` balance with only `2.5%–11.3%` boundary connections), `v95-t4` sped up `THEIA_jpeg` (**`135.68 s → 116.90 s`**, `-13.8%` E2E / `29` vs `41` rds), `k_140000fd_500000lut` (**`60.64 s → 54.60 s`**, `-10.0%`), `k_800_ram` `Route design` (**`46.36 s → 43.22 s`**, `-6.8%`, `11` vs `14` rds), and `k_100_dsp` `Route design` (`26.91 s → 25.54 s`).
+- `v94` remains the lowest full-suite 13-case total (`1,814.86 s`), as `v95-t4` hit a `22`-round serial `RouteTail` stall on `THEIA_20per` (`716.51 s`, vs `349.70 s` E2E / `286.74 s` Route under `v95-t3`) and `THEIA_50per` in [results/v95_all13/summary.jsonl](results/v95_all13/summary.jsonl) records the `v95-t3` PASS (`829.47 s`) while `v95-t4` tail stabilization (`v95-t5`) proceeds.
 
 ## Key Engineering Highlights (`v22 -> v94`)
 

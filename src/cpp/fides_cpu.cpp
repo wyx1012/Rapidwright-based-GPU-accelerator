@@ -175,6 +175,9 @@ struct NetScopeData {
     bool megaSyncTracked = false;
     I32 megaSlot = -1;
     std::vector<U32> megaDirtyIdx;
+    bool megaSyncTrackedReg[2] = {false, false};
+    I32 megaSlotReg[2] = {-1, -1};
+    std::vector<U32> megaDirtyReg[2];
     std::vector<U32> smallIds;
     std::vector<I32> smallCounts;
     std::vector<ScopeSlot> slots;
@@ -225,6 +228,10 @@ struct NetScopeData {
         ++layoutVersion;
         megaSyncTracked = false;
         megaDirtyIdx.clear();
+        for (int r = 0; r < 2; ++r) {
+            megaSyncTrackedReg[r] = false;
+            megaDirtyReg[r].clear();
+        }
     }
 
     void rehashFlat() {
@@ -252,6 +259,10 @@ struct NetScopeData {
         ++layoutVersion;
         megaSyncTracked = false;
         megaDirtyIdx.clear();
+        for (int r = 0; r < 2; ++r) {
+            megaSyncTrackedReg[r] = false;
+            megaDirtyReg[r].clear();
+        }
     }
 
     inline bool nearFullForDispatch() const {
@@ -327,6 +338,7 @@ struct GraphData {
     std::vector<I32> nextLaguna;
     std::vector<I32> prevLaguna;
     I32 sllLen = 0;
+    I32 maxSllSpanY = 64;
 
     std::vector<float> pcc;
     HugeBuf<I32> overusedPos;
@@ -1181,6 +1193,17 @@ inline void noteMegaSlotDirty(NetScopeData& sc, U32 idx) {
             sc.megaSyncTracked = false;
         }
     }
+    for (int r = 0; r < 2; ++r) {
+        if (sc.megaSyncTrackedReg[r]) {
+            if (sc.megaDirtyReg[r].size() < 65536u) {
+                sc.megaDirtyReg[r].push_back(idx);
+            } else {
+                sc.megaDirtyReg[r].clear();
+                ++sc.layoutVersion;
+                sc.megaSyncTrackedReg[r] = false;
+            }
+        }
+    }
 }
 
 template <class FnOccDelta>
@@ -1485,6 +1508,117 @@ struct DynamicExecutor {
 
 static DynamicExecutor EXEC;
 
+struct WaveThreadPool {
+    std::vector<std::thread> ths;
+    std::mutex mtx;
+    std::condition_variable cvWork, cvDone;
+    const std::function<void(size_t, size_t)>* fn = nullptr;
+    std::atomic<size_t> nextIdx{0};
+    std::atomic<uint64_t> gen{0};
+    std::atomic<int> pending{0};
+    size_t total = 0, grain = 1;
+    std::atomic<bool> stop{false};
+
+    void init(int n) {
+        if (static_cast<int>(ths.size()) >= n) return;
+        shutdown();
+        stop.store(false, std::memory_order_release);
+        ths.reserve(n);
+        for (int i = 0; i < n; ++i) {
+            ths.emplace_back([this]() {
+                uint64_t myGen = 0;
+                while (true) {
+                    uint64_t gNow = gen.load(std::memory_order_acquire);
+                    if (gNow == myGen) {
+                        for (int sp = 0; sp < 128; ++sp) {
+                            FIDES_PAUSE();
+                            gNow = gen.load(std::memory_order_acquire);
+                            if (gNow != myGen || stop.load(std::memory_order_relaxed)) break;
+                        }
+                    }
+                    if (gNow == myGen && !stop.load(std::memory_order_acquire)) {
+                        std::unique_lock<std::mutex> lk(mtx);
+                        cvWork.wait(lk, [&]() {
+                            return stop.load(std::memory_order_relaxed) || gen.load(std::memory_order_relaxed) != myGen;
+                        });
+                        gNow = gen.load(std::memory_order_acquire);
+                    }
+                    if (stop.load(std::memory_order_acquire)) return;
+                    myGen = gNow;
+                    const auto* fPtr = fn;
+                    const size_t tot = total;
+                    const size_t g = grain;
+                    while (true) {
+                        size_t lo = nextIdx.fetch_add(g, std::memory_order_relaxed);
+                        if (lo >= tot) break;
+                        (*fPtr)(lo, std::min(tot, lo + g));
+                    }
+                    if (pending.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+                        std::lock_guard<std::mutex> lk(mtx);
+                        cvDone.notify_one();
+                    }
+                }
+            });
+        }
+    }
+
+    template <class Fn>
+    void parallelFor(size_t tot, size_t g, Fn&& f) {
+        if (tot == 0u) return;
+        g = std::max<size_t>(1u, g);
+        if (ths.empty() || tot <= g) {
+            f(0u, tot);
+            return;
+        }
+        std::function<void(size_t, size_t)> cb(f);
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            fn = &cb;
+            total = tot;
+            grain = g;
+            nextIdx.store(0u, std::memory_order_relaxed);
+            pending.store(static_cast<int>(ths.size()), std::memory_order_release);
+            gen.fetch_add(1, std::memory_order_release);
+        }
+        cvWork.notify_all();
+        while (true) {
+            size_t lo = nextIdx.fetch_add(g, std::memory_order_relaxed);
+            if (lo >= tot) break;
+            cb(lo, std::min(tot, lo + g));
+        }
+        if (pending.load(std::memory_order_acquire) != 0) {
+            for (int sp = 0; sp < 128; ++sp) {
+                FIDES_PAUSE();
+                if (pending.load(std::memory_order_acquire) == 0) break;
+            }
+            if (pending.load(std::memory_order_acquire) != 0) {
+                std::unique_lock<std::mutex> lk(mtx);
+                cvDone.wait(lk, [&]() { return pending.load(std::memory_order_acquire) == 0; });
+            }
+        }
+        fn = nullptr;
+    }
+
+    void shutdown() {
+        if (ths.empty()) return;
+        {
+            std::lock_guard<std::mutex> lk(mtx);
+            stop.store(true, std::memory_order_release);
+            gen.fetch_add(1, std::memory_order_release);
+        }
+        cvWork.notify_all();
+        for (auto& t : ths) {
+            if (t.joinable()) t.join();
+        }
+        ths.clear();
+    }
+
+    ~WaveThreadPool() { shutdown(); }
+};
+
+static WaveThreadPool g_regPools[2];
+static std::mutex g_regNetMtx[4096];
+
 inline void flushGpuOccDeltas() {
     if (!G.gpuEnabled || G.gpuDirtyOccIds.empty()) return;
     U32 cnt = static_cast<U32>(G.gpuDirtyOccIds.size());
@@ -1775,6 +1909,7 @@ static bool preinitStaticImpl(const std::string& rrgPath, const std::string& lay
     HugeBuf<uint32_t> seg1Pack;
     seg1Pack.resizeNoInit(n);
     std::atomic<bool> boundsOk{true};
+    std::atomic<I32> maxSllSpan{0};
     parallelForU32(n, 36, [&](U32 lo, U32 hi) {
         const size_t cnt = static_cast<size_t>(hi - lo);
         std::memset(G.lastCommitSeq.data() + lo, 0, cnt * sizeof(U32));
@@ -1786,6 +1921,7 @@ static bool preinitStaticImpl(const std::string& rrgPath, const std::string& lay
             std::memset(G.waveCommitKey.data() + lo, 0, cnt * sizeof(U64));
         }
         bool localOk = true;
+        I32 localMaxSll = 0;
         for (U32 i = lo; i < hi; ++i) {
             I32 ex = endTileX[i];
             I32 ey = endTileYRaw[i];
@@ -1823,7 +1959,10 @@ static bool preinitStaticImpl(const std::string& rrgPath, const std::string& lay
             gc.endSlrTileY = -1;
 
             U16 pf = 0;
-            if (static_cast<U32>(nt) == ordSll) pf |= PF_SLL;
+            if (static_cast<U32>(nt) == ordSll) {
+                pf |= PF_SLL;
+                localMaxSll = std::max(localMaxSll, fides_absInt(ey - ty));
+            }
             if (G.tileFlags[tt] & 1u) pf |= PF_LAGUNA_TILE;
             if (G.tileFlags[tt] & 2u) pf |= PF_CLB_TILE;
             if (static_cast<U32>(tt) == ordIntTile) pf |= PF_INT_TILE;
@@ -1845,8 +1984,11 @@ static bool preinitStaticImpl(const std::string& rrgPath, const std::string& lay
             G.lastCommitNet[i] = UINT32_MAX;
         }
         if (!localOk) boundsOk.store(false, std::memory_order_relaxed);
+        I32 prev = maxSllSpan.load(std::memory_order_relaxed);
+        while (localMaxSll > prev && !maxSllSpan.compare_exchange_weak(prev, localMaxSll, std::memory_order_relaxed)) {}
     });
     if (!boundsOk.load(std::memory_order_relaxed)) return false;
+    G.maxSllSpanY = std::max<I32>(4, maxSllSpan.load(std::memory_order_relaxed));
 
     std::atomic<U64> seg1Total{0};
     parallelForU32(n, 36, [&](U32 lo, U32 hi) {
@@ -3357,16 +3499,14 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     // v35 GPU Dual-Engine Pass Runner (Parallel Phase-2 Direct-Pinned, HPWL_FIRST wave packing, Tier-A/B1/B2)
     std::vector<I32> megaQueue;
     megaQueue.reserve(64);
-    std::vector<U32> netWaveStamp(numNets, 0u);
-    std::vector<U32> netInWaveCnt(numNets, 0u);
-    std::vector<I32> netWaveDescIdx(numNets, -1);
-    U32 netWaveEpoch = 1u;
 
     struct SharedSameDesc {
         U32 mode = 0u;
         U32 offset = 0u;
         U32 param = 0u;
         U64 bloom64 = 0ULL;
+        U32 snapOff = 0u;
+        uint8_t isSnap = 0u;
     };
 
     struct PendingMegaUpload {
@@ -3375,6 +3515,8 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         int slot;
         U32 capH;
         size_t packOff;
+        U32 layoutVersion;
+        U32 mask;
     };
     struct PendingPatchNet {
         U32 netId;
@@ -3387,73 +3529,142 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
     auto prepareNetSameDescMeta = [&](size_t wi, U32 netId, U32& sameCursor,
                                       std::vector<PendingMegaUpload>& pendingUploads, size_t& totalPackWords,
                                       std::vector<PendingPatchNet>& pendingPatchNets,
-                                      uint8_t* usedMegaSlots, SharedSameDesc& outDesc) -> int {
-        NetScopeData& sc = G.netScopes[netId];
-        outDesc = SharedSameDesc{};
-        if (!sc.isFlat) {
-            U32 len = static_cast<U32>(sc.smallIds.size());
-            if (len == 0u) {
+                                      uint8_t* usedMegaSlots, SharedSameDesc& outDesc,
+                                      U32 slotBase, U32 slotCount, U32& slotClock,
+                                      bool regionMode, int fixedDev, const std::vector<uint8_t>* sharedNetMask,
+                                      std::vector<U32>& snapKeys, std::vector<I32>& snapVals) -> int {
+        const bool lockShared = regionMode && sharedNetMask != nullptr && (*sharedNetMask)[netId] != 0u;
+        U32 evictOld = UINT32_MAX;
+        {
+            std::unique_lock<std::mutex> lk;
+            if (lockShared) lk = std::unique_lock<std::mutex>(g_regNetMtx[netId & 4095u]);
+            NetScopeData& sc = G.netScopes[netId];
+            outDesc = SharedSameDesc{};
+            if (!sc.isFlat) {
+                U32 len = static_cast<U32>(sc.smallIds.size());
+                if (len == 0u) {
+                    outDesc.mode = 0u;
+                } else {
+                    outDesc.mode = 1u;
+                    outDesc.offset = sameCursor;
+                    outDesc.param = len;
+                    sameCursor += len;
+                    if (lockShared) {
+                        outDesc.isSnap = 1u;
+                        outDesc.snapOff = static_cast<U32>(snapKeys.size());
+                        U64 bloom = 0ULL;
+                        snapKeys.resize(outDesc.snapOff + len);
+                        snapVals.resize(outDesc.snapOff + len);
+                        for (U32 j = 0; j < len; ++j) {
+                            U32 id = sc.smallIds[j];
+                            snapKeys[outDesc.snapOff + j] = id;
+                            snapVals[outDesc.snapOff + j] = sc.smallCounts[j];
+                            bloom |= (1ULL << (mixId(id) & 63u));
+                        }
+                        outDesc.bloom64 = bloom;
+                    }
+                }
+                return 0;
+            }
+            if (sc.liveCount == 0u) {
                 outDesc.mode = 0u;
-            } else {
-                outDesc.mode = 1u;
+                return 0;
+            }
+            if (sc.liveCount <= 8192u) {
+                U32 capH = static_cast<U32>(nextPow2(std::max<size_t>(16u, static_cast<size_t>(sc.liveCount) * 2u)));
+                outDesc.mode = 2u;
                 outDesc.offset = sameCursor;
-                outDesc.param = len;
-                sameCursor += len;
+                outDesc.param = capH - 1u;
+                sameCursor += capH;
+                if (lockShared) {
+                    outDesc.isSnap = 1u;
+                    outDesc.snapOff = static_cast<U32>(snapKeys.size());
+                    const U32 maskH = capH - 1u;
+                    snapKeys.resize(outDesc.snapOff + capH, NetScopeData::EMPTY_KEY);
+                    snapVals.resize(outDesc.snapOff + capH, 0);
+                    U32* sk = snapKeys.data() + outDesc.snapOff;
+                    I32* sv = snapVals.data() + outDesc.snapOff;
+                    for (const ScopeSlot& sl : sc.slots) {
+                        if (sl.key != NetScopeData::EMPTY_KEY && sl.count > 0) {
+                            U32 idx = mixId(sl.key) & maskH;
+                            while (sk[idx] != NetScopeData::EMPTY_KEY) idx = (idx + 1u) & maskH;
+                            sk[idx] = sl.key;
+                            sv[idx] = sl.count;
+                        }
+                    }
+                }
+                return 0;
             }
-            return 0;
-        }
-        if (sc.liveCount == 0u) {
-            outDesc.mode = 0u;
-            return 0;
-        }
-        if (sc.liveCount <= 8192u) {
-            U32 capH = static_cast<U32>(nextPow2(std::max<size_t>(16u, static_cast<size_t>(sc.liveCount) * 2u)));
-            outDesc.mode = 2u;
-            outDesc.offset = sameCursor;
-            outDesc.param = capH - 1u;
-            sameCursor += capH;
-            return 0;
-        }
-        int slot = -1;
-        if (sc.megaSlot >= 0 && sc.megaSlot < 1024 && G.megaCache[sc.megaSlot].netId == netId) {
-            slot = sc.megaSlot;
-        } else {
-            for (int tries = 0; tries < 1024; ++tries) {
-                int cand = static_cast<int>((G.megaCacheClock++) % 1024u);
-                if (!usedMegaSlots[cand]) { slot = cand; break; }
+            int slot = -1;
+            int slotEnd = static_cast<int>(slotBase + slotCount);
+            I32& netMegaSlot = regionMode ? sc.megaSlotReg[fixedDev] : sc.megaSlot;
+            if (netMegaSlot >= static_cast<int>(slotBase) && netMegaSlot < slotEnd
+                    && G.megaCache[netMegaSlot].netId == netId) {
+                slot = netMegaSlot;
+            } else {
+                for (U32 tries = 0; tries < slotCount; ++tries) {
+                    int cand = static_cast<int>(slotBase + ((slotClock++) % slotCount));
+                    if (!usedMegaSlots[cand]) { slot = cand; break; }
+                }
+            }
+            if (slot < 0 || usedMegaSlots[slot]) {
+                return -1;
+            }
+            usedMegaSlots[slot] = 1;
+            std::vector<U32>& dirtyVec = regionMode ? sc.megaDirtyReg[fixedDev] : sc.megaDirtyIdx;
+            if (G.megaCache[slot].netId != netId || G.megaCache[slot].layoutVersion != sc.layoutVersion) {
+                U32 oldNet = G.megaCache[slot].netId;
+                if (oldNet != netId && oldNet < G.netScopes.size()) {
+                    evictOld = oldNet;
+                }
+                netMegaSlot = slot;
+                U32 capH = static_cast<U32>(sc.slots.size());
+                pendingUploads.push_back(PendingMegaUpload{wi, netId, slot, capH, totalPackWords, sc.layoutVersion, sc.mask});
+                totalPackWords += static_cast<size_t>(capH);
+                outDesc.mode = 3u;
+                outDesc.offset = static_cast<U32>(slot);
+                outDesc.param = sc.mask;
+            } else if (!dirtyVec.empty()) {
+                pendingPatchNets.push_back(PendingPatchNet{
+                    netId, static_cast<U32>(slot), static_cast<U32>(dirtyVec.size()), 0u
+                });
+                outDesc.mode = 3u;
+                outDesc.offset = static_cast<U32>(slot);
+                outDesc.param = G.megaCache[slot].mask;
+            } else {
+                outDesc.mode = 3u;
+                outDesc.offset = static_cast<U32>(slot);
+                outDesc.param = G.megaCache[slot].mask;
             }
         }
-        if (slot < 0 || usedMegaSlots[slot]) {
-            return -1;
-        }
-        usedMegaSlots[slot] = 1;
-        if (G.megaCache[slot].netId != netId || G.megaCache[slot].layoutVersion != sc.layoutVersion) {
-            U32 oldNet = G.megaCache[slot].netId;
-            if (oldNet != netId && oldNet < G.netScopes.size()) {
-                if (G.netScopes[oldNet].megaSlot == slot) G.netScopes[oldNet].megaSlot = -1;
-                G.netScopes[oldNet].megaSyncTracked = false;
-                G.netScopes[oldNet].megaDirtyIdx.clear();
+        if (evictOld < G.netScopes.size()) {
+            std::unique_lock<std::mutex> oldLk;
+            if (regionMode && sharedNetMask != nullptr && (*sharedNetMask)[evictOld] != 0u) {
+                oldLk = std::unique_lock<std::mutex>(g_regNetMtx[evictOld & 4095u]);
             }
-            sc.megaSlot = slot;
-            U32 capH = static_cast<U32>(sc.slots.size());
-            pendingUploads.push_back(PendingMegaUpload{wi, netId, slot, capH, totalPackWords});
-            totalPackWords += static_cast<size_t>(capH);
-            outDesc.mode = 3u;
-            outDesc.offset = static_cast<U32>(slot);
-            outDesc.param = sc.mask;
-            return 0;
-        } else if (!sc.megaDirtyIdx.empty()) {
-            pendingPatchNets.push_back(PendingPatchNet{
-                netId, static_cast<U32>(slot), static_cast<U32>(sc.megaDirtyIdx.size()), 0u
-            });
+            NetScopeData& osc = G.netScopes[evictOld];
+            if (regionMode) {
+                if (osc.megaSlotReg[fixedDev] == static_cast<I32>(outDesc.offset)) osc.megaSlotReg[fixedDev] = -1;
+                osc.megaSyncTrackedReg[fixedDev] = false;
+                osc.megaDirtyReg[fixedDev].clear();
+            } else {
+                if (osc.megaSlot == static_cast<I32>(outDesc.offset)) osc.megaSlot = -1;
+                osc.megaSyncTracked = false;
+                osc.megaDirtyIdx.clear();
+            }
         }
-        outDesc.mode = 3u;
-        outDesc.offset = static_cast<U32>(slot);
-        outDesc.param = G.megaCache[slot].mask;
         return 0;
     };
 
-    auto populateNetSameDescBuf = [&](U32 netId, SharedSameDesc& desc, U32* sameKeysPtr, I32* sameValsPtr) {
+    auto populateNetSameDescBuf = [&](U32 netId, SharedSameDesc& desc, U32* sameKeysPtr, I32* sameValsPtr,
+                                      const std::vector<U32>& snapKeys, const std::vector<I32>& snapVals) {
+        if (desc.isSnap) {
+            const U32 off = desc.offset;
+            const U32 cnt = (desc.mode == 1u) ? desc.param : (desc.param + 1u);
+            std::copy_n(snapKeys.data() + desc.snapOff, cnt, sameKeysPtr + off);
+            std::copy_n(snapVals.data() + desc.snapOff, cnt, sameValsPtr + off);
+            return;
+        }
         const NetScopeData& sc = G.netScopes[netId];
         if (desc.mode == 1u) {
             const U32 off = desc.offset;
@@ -3560,12 +3771,39 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         for (size_t i = 1; i + 1 < oldPath.size(); ++i) addToScope(sc, oldPath[i], +1);
     };
 
+    struct GpuPassOut {
+        std::vector<I32> baseHeavy;
+        std::vector<I32> relaxed;
+        std::vector<I32> fallback;
+        std::vector<I32> mega;
+        std::vector<U32> allDirtyIds;
+        std::vector<U32> ovCandidates;
+        I64 routed = 0, parCommits = 0, retries = 0, sameOk = 0;
+        I64 baseH = 0, relH = 0, fb = 0, unrout = 0, pops = 0, skipped = 0;
+        I64 gCommits = 0, gPops = 0, gNs = 0, gWaves = 0, gOv = 0, gFb = 0, gWideOk = 0, megaUp = 0;
+        double pickS = 0.0, metaS = 0.0, packS = 0.0, p4aS = 0.0, p4bS = 0.0, p4cS = 0.0;
+        double mPackS = 0.0, mGpuS = 0.0, mlS = 0.0, msS = 0.0, muS = 0.0, mvS = 0.0, mbS = 0.0;
+        I64 mdN = 0, mpN = 0, mwTot = 0, mpTot = 0;
+        U32 commitEpochEnd = 0u;
+        U32 dirtyEpochEnd = 0u;
+    };
+
     I64 gpuWideOk = 0;
-    auto runGpuPass = [&](const std::vector<I32>& passItems, int curBudget, int passTier,
-                          const std::vector<I32>* cpuOverlapItems = nullptr, bool forceTierB1 = false) {
+    auto runGpuPassImpl = [&](const std::vector<I32>& passItems, int curBudget, int passTier,
+                              const std::vector<I32>* cpuOverlapItems, bool forceTierB1,
+                              int fixedDev, WaveThreadPool* wavePool,
+                              U32 slotBase, U32 slotCount,
+                              U32 commitEpochSeed, U32 dirtyEpochSeed,
+                              const std::vector<uint8_t>* sharedNetMask,
+                              GpuPassOut& out) {
         const bool useTierB1 = (passTier >= 2) || forceTierB1;
+        const bool regionMode = (fixedDev >= 0);
+        auto parRun = [&](size_t tot, size_t grain, auto&& fn) {
+            if (wavePool) wavePool->parallelFor(tot, grain, fn);
+            else EXEC.parallelFor(tot, grain, fn);
+        };
         if (passItems.empty()) {
-            if (cpuOverlapItems && !cpuOverlapItems->empty()) {
+            if (!regionMode && cpuOverlapItems && !cpuOverlapItems->empty()) {
                 G.gpuStampWaveEpoch = 0u;
                 runDynamicPass(*cpuOverlapItems, curBudget, passTier);
             }
@@ -3574,8 +3812,6 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         const bool usePreRip = false; // v35+: exact virtual oldPath subtraction (d_countOldPath) in Tier-A/B1
         bool cpuOverlapDone = false;
 
-        std::vector<I32> cpuFallbackItems;
-        cpuFallbackItems.reserve(256);
         std::vector<I32> curItems = passItems;
         std::vector<I32> wideRetryItems;
         wideRetryItems.reserve(64);
@@ -3592,6 +3828,56 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             }
         };
         const U32 numNets = static_cast<U32>(G.netScopes.size());
+        std::vector<U32> netWaveStamp(numNets, 0u);
+        std::vector<U32> netInWaveCnt(numNets, 0u);
+        std::vector<I32> netWaveDescIdx(numNets, -1);
+        U32 netWaveEpoch = 1u;
+        U32 regSlotClock = 0u;
+        U32 regCommitSeq = 0u;
+        U32 regDirtySeq = 0u;
+        std::vector<U32> regWaveDirtyIds;
+        std::vector<I32> regWaveDirtyVals;
+        std::vector<U32> regSharedSnapKeys;
+        std::vector<I32> regSharedSnapVals;
+        if (regionMode) {
+            regWaveDirtyIds.reserve(65536u);
+            regWaveDirtyVals.reserve(65536u);
+            regSharedSnapKeys.reserve(131072u);
+            regSharedSnapVals.reserve(131072u);
+            out.allDirtyIds.reserve(passItems.size() * 6u);
+        }
+
+        // Preserve strict HPWL_FIRST wave ordering across regions
+        std::vector<uint8_t> netCell;
+        const bool useCellSpread = false;
+        if (useCellSpread) {
+            netCell.assign(numNets, 0u);
+            I32 rX0 = std::numeric_limits<I32>::max(), rY0 = std::numeric_limits<I32>::max();
+            I32 rX1 = std::numeric_limits<I32>::min(), rY1 = std::numeric_limits<I32>::min();
+            std::vector<uint8_t> netCellSet(numNets, 0u);
+            for (I32 aIdx : passItems) {
+                const ConnData& cd = G.conns[activeConns[aIdx]];
+                I32 cx = (cd.origXmin + cd.origXmax) >> 1;
+                I32 cy = (cd.origYmin + cd.origYmax) >> 1;
+                rX0 = std::min(rX0, cx); rX1 = std::max(rX1, cx);
+                rY0 = std::min(rY0, cy); rY1 = std::max(rY1, cy);
+            }
+            I32 spanX = std::max<I32>(1, rX1 - rX0 + 1);
+            I32 spanY = std::max<I32>(1, rY1 - rY0 + 1);
+            for (I32 aIdx : passItems) {
+                U32 cIdx = static_cast<U32>(activeConns[aIdx]);
+                U32 nid = G.conns[cIdx].netId;
+                if (netCellSet[nid]) continue;
+                netCellSet[nid] = 1u;
+                const ConnData& cd = G.conns[cIdx];
+                I32 cx = (cd.origXmin + cd.origXmax) >> 1;
+                I32 cy = (cd.origYmin + cd.origYmax) >> 1;
+                int bx = std::max(0, std::min(7, static_cast<int>(((cx - rX0) * 8) / spanX)));
+                int by = std::max(0, std::min(7, static_cast<int>(((cy - rY0) * 8) / spanY)));
+                netCell[nid] = static_cast<uint8_t>((bx << 3) | by);
+            }
+        }
+
         std::vector<I32> netItemHead(numNets, -1);
         std::vector<I32> netItemTail(numNets, -1);
         std::vector<I32> nextSameNetItem(static_cast<size_t>(activeCount), -1);
@@ -3600,6 +3886,8 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         std::priority_queue<GpuReadyNet, std::vector<GpuReadyNet>, std::greater<GpuReadyNet>> readyHeap;
         std::vector<U32> waveRequeueNets;
         waveRequeueNets.reserve(8192);
+        std::vector<U32> deferredCellNets;
+        deferredCellNets.reserve(4096);
         size_t liveHeapNets = 0;
         size_t remainingItems = 0;
 
@@ -3700,14 +3988,17 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
 
         U32 targetWave = 512u;
         if (passTier == 1) {
-            if (useTierB1) {
+            if (regionMode) {
+                targetWave = (routeIter == 1) ? 5120u : 4096u;
+            } else if (useTierB1) {
                 targetWave = (G.gpuCount >= 3) ? 2048u : 1024u;
             } else if (routeIter == 3) {
                 targetWave = (G.gpuCount >= 3) ? 8192u : 4096u;
             } else if (routeIter >= 4) {
                 targetWave = (G.gpuCount >= 3) ? 4096u : 2048u;
             } else {
-                targetWave = (G.gpuCount >= 3) ? std::min<U32>(12288u, static_cast<U32>(G.gpuCount) * 3072u) : 8192u;
+                targetWave = (G.gpuCount >= 3) ? std::min<U32>(12288u, static_cast<U32>(G.gpuCount) * 3072u)
+                                               : 8192u;
             }
         } else if (passTier == 2) {
             targetWave = (G.gpuCount >= 3 && curItems.size() > 4096u) ? 2048u : 1024u;
@@ -3726,6 +4017,9 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             pickedRipped.clear();
             waveUniqueNets.clear();
             waveRequeueNets.clear();
+            deferredCellNets.clear();
+            uint16_t cellPicked[64]{};
+            const U32 cellCap = (useCellSpread && tw >= 512u) ? std::max<U32>(24u, tw / 32u) : tw;
             U32 megaWaveCnt = 0u;
 
             auto tryPickOne = [&](I32 aIdx, U32 maxPerNetLimit) -> int {
@@ -3747,7 +4041,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 const NetScopeData& sc = G.netScopes[netId];
                 bool seenNet = (netWaveStamp[netId] == curNetEp);
                 if (seenNet && netInWaveCnt[netId] >= maxPerNetLimit) return 1;
-                if (!seenNet && sc.isFlat && sc.liveCount > 8192u && megaWaveCnt >= 1024u) return 1;
+                if (!seenNet && sc.isFlat && sc.liveCount > 8192u && megaWaveCnt >= (regionMode ? 512u : 1024u)) return 1;
 
                 if (!seenNet) {
                     netWaveStamp[netId] = curNetEp;
@@ -3763,7 +4057,25 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 return 2;
             };
 
-            // Pass A: pop 1 live connection per distinct net in strict HPWL_FIRST order
+            auto popOneFromNet = [&](U32 netId, U32 maxPerNetLimit) {
+                while (netItemHead[netId] >= 0) {
+                    I32 aIdx = popNetItem(netId);
+                    --remainingItems;
+                    int pr = tryPickOne(aIdx, maxPerNetLimit);
+                    if (pr == 2) {
+                        if (useCellSpread) ++cellPicked[netCell[netId]];
+                        break;
+                    }
+                    if (pr == 1) {
+                        pushNetItem(aIdx, true, false);
+                        ++remainingItems;
+                        break;
+                    }
+                }
+                if (netItemHead[netId] >= 0) waveRequeueNets.push_back(netId);
+            };
+
+            // Pass A: pop 1 live connection per distinct net in strict HPWL_FIRST order (spread across 64 spatial micro-blocks)
             while (pickedActIdx.size() < tw && !readyHeap.empty()) {
                 GpuReadyNet top = readyHeap.top();
                 readyHeap.pop();
@@ -3772,18 +4084,20 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 netInHeap[netId] = 0u;
                 --liveHeapNets;
                 ++netVer[netId];
-                while (netItemHead[netId] >= 0) {
-                    I32 aIdx = popNetItem(netId);
-                    --remainingItems;
-                    int pr = tryPickOne(aIdx, 1u);
-                    if (pr == 2) break;
-                    if (pr == 1) {
-                        pushNetItem(aIdx, true, false);
-                        ++remainingItems;
-                        break;
-                    }
+                if (useCellSpread && cellPicked[netCell[netId]] >= cellCap && deferredCellNets.size() < tw) {
+                    deferredCellNets.push_back(netId);
+                    continue;
                 }
-                if (netItemHead[netId] >= 0) waveRequeueNets.push_back(netId);
+                popOneFromNet(netId, 1u);
+            }
+
+            for (size_t di = 0; di < deferredCellNets.size(); ++di) {
+                U32 netId = deferredCellNets[di];
+                if (pickedActIdx.size() < tw) {
+                    popOneFromNet(netId, 1u);
+                } else {
+                    if (netItemHead[netId] >= 0) waveRequeueNets.push_back(netId);
+                }
             }
 
             // Pass B: tail fill only when distinct active nets fall below tw/2
@@ -3820,37 +4134,42 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             if (pickedActIdx.empty()) return;
 
             const size_t W = waveUniqueNets.size();
-            netWeight.assign(W, 0);
-            netQCount.assign(W, 0u);
-            for (I32 aIdx : pickedActIdx) {
-                U32 cIdx = static_cast<U32>(activeConns[aIdx]);
-                I32 wi = netWaveDescIdx[G.conns[cIdx].netId];
-                ++netQCount[wi];
-                netWeight[wi] += std::max<I64>(500LL, G.lastPops[cIdx]);
-            }
-            if (numDevs <= 1) {
-                netAssignedDev.assign(W, 0);
+            if (regionMode) {
+                netAssignedDev.assign(W, fixedDev);
             } else {
-                netAssignedDev.resize(W);
-                netOrder.resize(W);
-                for (size_t wi = 0; wi < W; ++wi) netOrder[wi] = static_cast<U32>(wi);
-                std::sort(netOrder.begin(), netOrder.end(), [&](U32 a, U32 b) {
-                    if (netWeight[a] != netWeight[b]) return netWeight[a] > netWeight[b];
-                    return netQCount[a] > netQCount[b];
-                });
-                I64 devLoad[FG_MAX_GPUS]{};
-                U32 devCnt[FG_MAX_GPUS]{};
-                for (U32 wi : netOrder) {
-                    int bestD = 0;
-                    for (int d = 1; d < numDevs; ++d) {
-                        if (devLoad[d] < devLoad[bestD]
-                                || (devLoad[d] == devLoad[bestD] && devCnt[d] < devCnt[bestD])) {
-                            bestD = d;
+                netWeight.assign(W, 0);
+                netQCount.assign(W, 0u);
+                for (I32 aIdx : pickedActIdx) {
+                    U32 cIdx = static_cast<U32>(activeConns[aIdx]);
+                    const ConnData& cd = G.conns[cIdx];
+                    I32 wi = netWaveDescIdx[cd.netId];
+                    ++netQCount[wi];
+                    netWeight[wi] += std::max<I64>(500LL, G.lastPops[cIdx]);
+                }
+                if (numDevs <= 1) {
+                    netAssignedDev.assign(W, 0);
+                } else {
+                    netAssignedDev.resize(W);
+                    netOrder.resize(W);
+                    for (size_t wi = 0; wi < W; ++wi) netOrder[wi] = static_cast<U32>(wi);
+                    std::sort(netOrder.begin(), netOrder.end(), [&](U32 a, U32 b) {
+                        if (netWeight[a] != netWeight[b]) return netWeight[a] > netWeight[b];
+                        return netQCount[a] > netQCount[b];
+                    });
+                    I64 devLoad[FG_MAX_GPUS]{};
+                    U32 devCnt[FG_MAX_GPUS]{};
+                    for (U32 wi : netOrder) {
+                        int bestD = 0;
+                        for (int d = 1; d < numDevs; ++d) {
+                            if (devLoad[d] < devLoad[bestD]
+                                    || (devLoad[d] == devLoad[bestD] && devCnt[d] < devCnt[bestD])) {
+                                bestD = d;
+                            }
                         }
+                        netAssignedDev[wi] = bestD;
+                        devLoad[bestD] += netWeight[wi];
+                        devCnt[bestD] += netQCount[wi];
                     }
-                    netAssignedDev[wi] = bestD;
-                    devLoad[bestD] += netWeight[wi];
-                    devCnt[bestD] += netQCount[wi];
                 }
             }
         };
@@ -3879,7 +4198,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
 
             auto drainReadyToCpuFallback = [&](bool includePicked) {
                 if (includePicked) {
-                    cpuFallbackItems.insert(cpuFallbackItems.end(), pickedActIdx.begin(), pickedActIdx.end());
+                    out.fallback.insert(out.fallback.end(), pickedActIdx.begin(), pickedActIdx.end());
                     pickedActIdx.clear();
                 }
                 while (!readyHeap.empty()) {
@@ -3894,9 +4213,9 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                         I32 aIdx = popNetItem(netId);
                         --remainingItems;
                         if (!shouldRouteLive(static_cast<U32>(activeConns[aIdx]))) {
-                            ++skippedLive;
+                            ++out.skipped;
                         } else {
-                            cpuFallbackItems.push_back(aIdx);
+                            out.fallback.push_back(aIdx);
                         }
                     }
                 }
@@ -3909,8 +4228,8 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 }
 
                 auto tPick0 = std::chrono::steady_clock::now();
-                pickAndLpt(targetWave, skippedLive, cpuFallbackItems);
-                hostPickS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tPick0).count();
+                pickAndLpt(targetWave, out.skipped, out.fallback);
+                out.pickS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tPick0).count();
                 if (pickedActIdx.empty()) continue;
             }
             hasPrePicked = false;
@@ -3919,17 +4238,17 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             if (passTier == 1 && routeIter >= 3
                     && (pickedActIdx.size() < ((G.gpuCount >= 3) ? 2048u : 1536u)
                         || pickedActIdx.size() < (targetWave / 2u)
-                        || gpuWaves >= maxMidWaves)) {
+                        || out.gWaves >= maxMidWaves)) {
                 drainReadyToCpuFallback(true);
                 break;
             }
-            if (passTier == 3 && tierB1Mode == 0 && gpuWaves >= 1u
+            if (passTier == 3 && tierB1Mode == 0 && out.gWaves >= 1u
                     && pickedActIdx.size() < 64u && (remainingItems + pickedActIdx.size()) < 96u) {
                 drainReadyToCpuFallback(true);
                 break;
             }
 
-            // Phase 2A-meta: Mode 3 mega slots (1024 cache, 35-core parallel dirty sort/patch & batch upload) & per-GPU query offsets
+            // Phase 2A-meta: Mode 3 mega slots (1024 cache, parallel dirty sort/patch & batch upload) & per-GPU query offsets
             auto tMeta0 = std::chrono::steady_clock::now();
             megaPatches.clear();
             pendingUploads.clear();
@@ -3937,11 +4256,20 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             size_t totalPackWords = 0u;
             uint8_t usedMegaSlots[1024] = {0};
             const size_t W = waveUniqueNets.size();
-            hostMetaWTot += static_cast<I64>(W);
+            out.mwTot += static_cast<I64>(W);
 
+            const int startDev = regionMode ? fixedDev : 0;
+            const int endDev = regionMode ? (fixedDev + 1) : numDevs;
+            auto isNetShared = [&](U32 netId) -> bool {
+                return regionMode && sharedNetMask != nullptr && (*sharedNetMask)[netId] != 0u;
+            };
+            if (regionMode) {
+                regSharedSnapKeys.clear();
+                regSharedSnapVals.clear();
+            }
             waveNetDescs.resize(W);
             waveNetFailed.assign(W, 0u);
-            for (int d = 0; d < numDevs; ++d) {
+            for (int d = startDev; d < endDev; ++d) {
                 devSameCursor[d] = 0u;
                 devB[d] = 0u;
                 devOldCursor[d] = 0u;
@@ -3952,12 +4280,15 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 U32 netId = waveUniqueNets[wi];
                 int d = netAssignedDev[wi];
                 if (prepareNetSameDescMeta(wi, netId, devSameCursor[d], pendingUploads, totalPackWords,
-                                           pendingPatchNets, usedMegaSlots, waveNetDescs[wi]) != 0) {
+                                           pendingPatchNets, usedMegaSlots, waveNetDescs[wi],
+                                           slotBase, slotCount, regSlotClock,
+                                           regionMode, fixedDev, sharedNetMask,
+                                           regSharedSnapKeys, regSharedSnapVals) != 0) {
                     waveNetFailed[wi] = 1u;
                 }
             }
             auto tLoop1 = std::chrono::steady_clock::now();
-            hostMetaLoopS += std::chrono::duration<double>(tLoop1 - tMeta0).count();
+            out.mlS += std::chrono::duration<double>(tLoop1 - tMeta0).count();
 
             if (!pendingPatchNets.empty()) {
                 auto tSort0 = std::chrono::steady_clock::now();
@@ -3969,16 +4300,18 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 }
                 size_t totalDirtyWave = 0u;
                 for (const PendingPatchNet& pn : pendingPatchNets) totalDirtyWave += pn.dirtySz;
-                hostMetaDirtyN += static_cast<I64>(totalDirtyWave);
+                out.mdN += static_cast<I64>(totalDirtyWave);
                 auto sortDedupNet = [&](PendingPatchNet& pn) {
+                    std::unique_lock<std::mutex> lk;
+                    if (isNetShared(pn.netId)) lk = std::unique_lock<std::mutex>(g_regNetMtx[pn.netId & 4095u]);
                     NetScopeData& sc = G.netScopes[pn.netId];
-                    std::sort(sc.megaDirtyIdx.begin(), sc.megaDirtyIdx.end());
-                    sc.megaDirtyIdx.erase(std::unique(sc.megaDirtyIdx.begin(), sc.megaDirtyIdx.end()),
-                                          sc.megaDirtyIdx.end());
-                    pn.dirtySz = static_cast<U32>(sc.megaDirtyIdx.size());
+                    std::vector<U32>& dVec = regionMode ? sc.megaDirtyReg[fixedDev] : sc.megaDirtyIdx;
+                    std::sort(dVec.begin(), dVec.end());
+                    dVec.erase(std::unique(dVec.begin(), dVec.end()), dVec.end());
+                    pn.dirtySz = static_cast<U32>(dVec.size());
                 };
                 if (totalDirtyWave >= 2048u && pendingPatchNets.size() > 1u) {
-                    EXEC.parallelFor(pendingPatchNets.size(), 1u, [&](size_t lo, size_t hi) {
+                    parRun(pendingPatchNets.size(), 1u, [&](size_t lo, size_t hi) {
                         for (size_t i = lo; i < hi; ++i) sortDedupNet(pendingPatchNets[i]);
                     });
                 } else {
@@ -3989,26 +4322,32 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                     pn.patchOff = patchCursor;
                     patchCursor += pn.dirtySz;
                 }
-                hostMetaPatchN += static_cast<I64>(patchCursor);
+                out.mpN += static_cast<I64>(patchCursor);
                 megaPatches.resize(patchCursor);
                 auto emitPatches = [&](const PendingPatchNet& pn) {
+                    std::unique_lock<std::mutex> lk;
+                    if (isNetShared(pn.netId)) lk = std::unique_lock<std::mutex>(g_regNetMtx[pn.netId & 4095u]);
                     NetScopeData& sc = G.netScopes[pn.netId];
+                    std::vector<U32>& dVec = regionMode ? sc.megaDirtyReg[fixedDev] : sc.megaDirtyIdx;
                     FidesGpuMegaPatch* dst = megaPatches.data() + pn.patchOff;
-                    const U32 nP = pn.dirtySz;
+                    const U32 nP = static_cast<U32>(std::min<size_t>(pn.dirtySz, dVec.size()));
                     for (U32 j = 0u; j < nP; ++j) {
-                        U32 idx = sc.megaDirtyIdx[j];
+                        U32 idx = dVec[j];
                         dst[j] = FidesGpuMegaPatch{pn.slot, idx, sc.slots[idx].key, sc.slots[idx].count};
                     }
-                    sc.megaDirtyIdx.clear();
+                    for (U32 j = nP; j < pn.dirtySz; ++j) {
+                        dst[j] = FidesGpuMegaPatch{pn.slot, 0u, sc.slots[0].key, sc.slots[0].count};
+                    }
+                    dVec.clear();
                 };
                 if (patchCursor >= 2048u && pendingPatchNets.size() > 1u) {
-                    EXEC.parallelFor(pendingPatchNets.size(), 1u, [&](size_t lo, size_t hi) {
+                    parRun(pendingPatchNets.size(), 1u, [&](size_t lo, size_t hi) {
                         for (size_t i = lo; i < hi; ++i) emitPatches(pendingPatchNets[i]);
                     });
                 } else {
                     for (size_t i = 0; i < pendingPatchNets.size(); ++i) emitPatches(pendingPatchNets[i]);
                 }
-                hostMetaSortS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tSort0).count();
+                out.msS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tSort0).count();
             }
             tLoop1 = std::chrono::steady_clock::now();
 
@@ -4017,62 +4356,120 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 megaPackKeys.resize(totalPackWords);
                 megaPackVals.resize(totalPackWords);
                 uploadChunks.clear();
-                uploadDescs.resize(pendingUploads.size());
+                uploadDescs.clear();
+                uploadDescs.reserve(pendingUploads.size());
+                std::vector<size_t> sentUpIdx;
+                sentUpIdx.reserve(pendingUploads.size());
                 for (size_t ui = 0; ui < pendingUploads.size(); ++ui) {
                     const PendingMegaUpload& pm = pendingUploads[ui];
-                    uploadDescs[ui] = FidesGpuMegaUpload{
-                        pm.slot,
-                        megaPackKeys.data() + pm.packOff,
-                        megaPackVals.data() + pm.packOff,
-                        pm.capH
-                    };
-                    for (U32 j0 = 0u; j0 < pm.capH; j0 += 16384u) {
-                        U32 j1 = std::min<U32>(pm.capH, j0 + 16384u);
-                        uploadChunks.push_back(MegaPackChunk{ui, j0, j1});
-                    }
-                }
-                EXEC.parallelFor(uploadChunks.size(), 1u, [&](size_t cLo, size_t cHi) {
-                    for (size_t ci = cLo; ci < cHi; ++ci) {
-                        const MegaPackChunk& ck = uploadChunks[ci];
-                        const PendingMegaUpload& pm = pendingUploads[ck.upIdx];
-                        const ScopeSlot* slPtr = G.netScopes[pm.netId].slots.data();
+                    if (isNetShared(pm.netId)) {
+                        std::lock_guard<std::mutex> lk(g_regNetMtx[pm.netId & 4095u]);
+                        const NetScopeData& sc = G.netScopes[pm.netId];
+                        if (sc.layoutVersion != pm.layoutVersion || sc.slots.size() != pm.capH) {
+                            waveNetFailed[pm.wi] = 1u;
+                            continue;
+                        }
+                        const ScopeSlot* slPtr = sc.slots.data();
                         U32* dstK = megaPackKeys.data() + pm.packOff;
                         I32* dstV = megaPackVals.data() + pm.packOff;
-                        for (U32 j = ck.j0; j < ck.j1; ++j) {
+                        for (U32 j = 0u; j < pm.capH; ++j) {
                             dstK[j] = slPtr[j].key;
                             dstV[j] = slPtr[j].count;
                         }
+                        uploadDescs.push_back(FidesGpuMegaUpload{pm.slot, dstK, dstV, pm.capH});
+                        sentUpIdx.push_back(ui);
+                    } else {
+                        uploadDescs.push_back(FidesGpuMegaUpload{
+                            pm.slot,
+                            megaPackKeys.data() + pm.packOff,
+                            megaPackVals.data() + pm.packOff,
+                            pm.capH
+                        });
+                        sentUpIdx.push_back(ui);
+                        for (U32 j0 = 0u; j0 < pm.capH; j0 += 16384u) {
+                            U32 j1 = std::min<U32>(pm.capH, j0 + 16384u);
+                            uploadChunks.push_back(MegaPackChunk{ui, j0, j1});
+                        }
                     }
-                });
+                }
+                if (!uploadChunks.empty()) {
+                    parRun(uploadChunks.size(), 1u, [&](size_t cLo, size_t cHi) {
+                        for (size_t ci = cLo; ci < cHi; ++ci) {
+                            const MegaPackChunk& ck = uploadChunks[ci];
+                            const PendingMegaUpload& pm = pendingUploads[ck.upIdx];
+                            const ScopeSlot* slPtr = G.netScopes[pm.netId].slots.data();
+                            U32* dstK = megaPackKeys.data() + pm.packOff;
+                            I32* dstV = megaPackVals.data() + pm.packOff;
+                            for (U32 j = ck.j0; j < ck.j1; ++j) {
+                                dstK[j] = slPtr[j].key;
+                                dstV[j] = slPtr[j].count;
+                            }
+                        }
+                    });
+                }
                 auto tMG0 = std::chrono::steady_clock::now();
-                megaPackS += std::chrono::duration<double>(tMG0 - tMP0).count();
-                bool upOk = fidesGpuUploadMegaScopesBatch(uploadDescs.data(), static_cast<U32>(uploadDescs.size()));
-                megaGpuS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tMG0).count();
-                megaUploadCount += static_cast<I64>(pendingUploads.size());
+                out.mPackS += std::chrono::duration<double>(tMG0 - tMP0).count();
+                bool upOk = uploadDescs.empty() ? true : (regionMode
+                        ? fidesGpuUploadMegaScopesBatchDev(fixedDev, uploadDescs.data(), static_cast<U32>(uploadDescs.size()))
+                        : fidesGpuUploadMegaScopesBatch(uploadDescs.data(), static_cast<U32>(uploadDescs.size())));
+                out.mGpuS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tMG0).count();
+                out.megaUp += static_cast<I64>(uploadDescs.size());
                 if (upOk) {
-                    for (const PendingMegaUpload& pm : pendingUploads) {
+                    for (size_t ui : sentUpIdx) {
+                        const PendingMegaUpload& pm = pendingUploads[ui];
+                        std::unique_lock<std::mutex> lk;
+                        if (isNetShared(pm.netId)) lk = std::unique_lock<std::mutex>(g_regNetMtx[pm.netId & 4095u]);
                         NetScopeData& sc = G.netScopes[pm.netId];
-                        G.megaCache[pm.slot] = {pm.netId, sc.layoutVersion, sc.mask};
-                        sc.megaSlot = pm.slot;
-                        sc.megaDirtyIdx.clear();
-                        sc.megaSyncTracked = true;
+                        if (sc.layoutVersion != pm.layoutVersion) {
+                            waveNetFailed[pm.wi] = 1u;
+                            G.megaCache[pm.slot] = {UINT32_MAX, 0u, 0u};
+                            if (regionMode) {
+                                if (sc.megaSlotReg[fixedDev] == pm.slot) sc.megaSlotReg[fixedDev] = -1;
+                                sc.megaSyncTrackedReg[fixedDev] = false;
+                                sc.megaDirtyReg[fixedDev].clear();
+                            } else {
+                                if (sc.megaSlot == pm.slot) sc.megaSlot = -1;
+                                sc.megaSyncTracked = false;
+                                sc.megaDirtyIdx.clear();
+                            }
+                            continue;
+                        }
+                        G.megaCache[pm.slot] = {pm.netId, pm.layoutVersion, pm.mask};
+                        if (regionMode) {
+                            sc.megaSlotReg[fixedDev] = pm.slot;
+                            sc.megaDirtyReg[fixedDev].clear();
+                            sc.megaSyncTrackedReg[fixedDev] = true;
+                        } else {
+                            sc.megaSlot = pm.slot;
+                            sc.megaDirtyIdx.clear();
+                            sc.megaSyncTracked = true;
+                        }
                     }
                 } else {
-                    for (const PendingMegaUpload& pm : pendingUploads) {
+                    for (size_t ui : sentUpIdx) {
+                        const PendingMegaUpload& pm = pendingUploads[ui];
                         waveNetFailed[pm.wi] = 1u;
                         G.megaCache[pm.slot] = {UINT32_MAX, 0u, 0u};
-                        if (G.netScopes[pm.netId].megaSlot == pm.slot) G.netScopes[pm.netId].megaSlot = -1;
+                        std::unique_lock<std::mutex> lk;
+                        if (isNetShared(pm.netId)) lk = std::unique_lock<std::mutex>(g_regNetMtx[pm.netId & 4095u]);
+                        if (regionMode) {
+                            if (G.netScopes[pm.netId].megaSlotReg[fixedDev] == pm.slot) {
+                                G.netScopes[pm.netId].megaSlotReg[fixedDev] = -1;
+                            }
+                        } else {
+                            if (G.netScopes[pm.netId].megaSlot == pm.slot) G.netScopes[pm.netId].megaSlot = -1;
+                        }
                     }
                 }
             }
 
             auto tLive0 = std::chrono::steady_clock::now();
-            hostMetaUpWrapS += std::chrono::duration<double>(tLive0 - tLoop1).count();
+            out.muS += std::chrono::duration<double>(tLive0 - tLoop1).count();
             const size_t P = pickedActIdx.size();
-            hostMetaPTot += static_cast<I64>(P);
+            out.mpTot += static_cast<I64>(P);
             piLive.assign(P, 1u);
             if (routeIter > 1 && P > 0u) {
-                EXEC.parallelFor(P, 128u, [&](size_t lo, size_t hi) {
+                parRun(P, 128u, [&](size_t lo, size_t hi) {
                     for (size_t pi = lo; pi < hi; ++pi) {
                         if (!shouldRouteLive(static_cast<U32>(activeConns[pickedActIdx[pi]]))) {
                             piLive[pi] = 0u;
@@ -4082,7 +4479,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             }
 
             auto tBuild0 = std::chrono::steady_clock::now();
-            hostMetaLiveS += std::chrono::duration<double>(tBuild0 - tLive0).count();
+            out.mvS += std::chrono::duration<double>(tBuild0 - tLive0).count();
             waveActIdx.clear();
             wasRipped.clear();
             itemDev.clear();
@@ -4097,7 +4494,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             waveOldLen.reserve(P);
             for (size_t pi = 0; pi < P; ++pi) {
                 if (!piLive[pi]) {
-                    ++skippedLive;
+                    ++out.skipped;
                     continue;
                 }
                 I32 aIdx = pickedActIdx[pi];
@@ -4106,8 +4503,8 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 I32 dIdx = netWaveDescIdx[netId];
                 if (waveNetFailed[dIdx]) {
                     if (pickedRipped[pi]) restoreRipped(cIdx);
-                    cpuFallbackItems.push_back(aIdx);
-                    ++gpuFallbacks;
+                    out.fallback.push_back(aIdx);
+                    ++out.gFb;
                     continue;
                 }
                 int d = netAssignedDev[dIdx];
@@ -4123,15 +4520,15 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 devOldCursor[d] += oldLen;
             }
             auto tMeta1 = std::chrono::steady_clock::now();
-            hostMetaBuildS += std::chrono::duration<double>(tMeta1 - tBuild0).count();
-            hostMetaS += std::chrono::duration<double>(tMeta1 - tMeta0).count();
+            out.mbS += std::chrono::duration<double>(tMeta1 - tBuild0).count();
+            out.metaS += std::chrono::duration<double>(tMeta1 - tMeta0).count();
 
             if (waveActIdx.empty()) continue;
 
             auto tPack0 = std::chrono::steady_clock::now();
             U32 B = static_cast<U32>(waveActIdx.size());
             bool acqOk = true;
-            for (int d = 0; d < numDevs; ++d) {
+            for (int d = startDev; d < endDev; ++d) {
                 if (devB[d] > 0u) {
                     if (!fidesGpuAcquireWaveBufsDev(d, devB[d], devSameCursor[d], outPathsWords, devOldCursor[d],
                                                     0u, &devBufs[d])) {
@@ -4141,29 +4538,30 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 }
             }
             if (!acqOk) {
-                hostPackS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tPack0).count();
+                out.packS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tPack0).count();
                 for (U32 k = 0; k < B; ++k) {
                     I32 aIdx = waveActIdx[k];
                     if (wasRipped[k]) restoreRipped(static_cast<U32>(activeConns[aIdx]));
-                    cpuFallbackItems.push_back(aIdx);
-                    ++gpuFallbacks;
+                    out.fallback.push_back(aIdx);
+                    ++out.gFb;
                 }
                 continue;
             }
 
-            // Phase 2B (35-core parallel): populate mode 1/2 sameNet tables directly into each GPU's pinned memory
-            EXEC.parallelFor(W, 64u, [&](size_t lo, size_t hi) {
+            // Phase 2B (parallel): populate mode 1/2 sameNet tables directly into each GPU's pinned memory
+            parRun(W, 64u, [&](size_t lo, size_t hi) {
                 for (size_t wi = lo; wi < hi; ++wi) {
                     if (!waveNetFailed[wi]) {
                         int d = netAssignedDev[wi];
                         populateNetSameDescBuf(waveUniqueNets[wi], waveNetDescs[wi],
-                                               devBufs[d].sameKeys, devBufs[d].sameVals);
+                                               devBufs[d].sameKeys, devBufs[d].sameVals,
+                                               regSharedSnapKeys, regSharedSnapVals);
                     }
                 }
             });
 
-            // Phase 2C (35-core parallel): pack queries + sort oldNodes directly into each GPU's pinned memory
-            EXEC.parallelFor(B, 128u, [&](size_t lo, size_t hi) {
+            // Phase 2C (parallel): pack queries + sort oldNodes directly into each GPU's pinned memory
+            parRun(B, 128u, [&](size_t lo, size_t hi) {
                 for (size_t k = lo; k < hi; ++k) {
                     I32 aIdx = waveActIdx[k];
                     U32 cIdx = static_cast<U32>(activeConns[aIdx]);
@@ -4174,15 +4572,31 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                                        waveOldOff[k], waveOldLen[k], devBufs[d].oldNodes, devBufs[d].queries[lk]);
                 }
             });
-            hostPackS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tPack0).count();
+            out.packS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tPack0).count();
 
-            // Phase 3: Broadcast megaPatches + dirty occ deltas and launch concurrent Multi-GPU kernels
-            // Overlap next wave's Phase 1 (readyHeap Pick) + Phase 2A-LPT with 4-GPU kernel execution!
+            // Phase 3: Broadcast megaPatches + dirty occ deltas and launch concurrent Multi-GPU / Isolated-Region kernels
             auto tGpu0 = std::chrono::steady_clock::now();
             if (!megaPatches.empty()) {
-                fidesGpuApplyMegaPatches(megaPatches.data(), static_cast<U32>(megaPatches.size()));
+                if (regionMode) {
+                    fidesGpuApplyMegaPatchesDev(fixedDev, megaPatches.data(), static_cast<U32>(megaPatches.size()));
+                } else {
+                    fidesGpuApplyMegaPatches(megaPatches.data(), static_cast<U32>(megaPatches.size()));
+                }
             }
-            flushGpuOccDeltas();
+            if (!regionMode) {
+                flushGpuOccDeltas();
+            } else if (!regWaveDirtyIds.empty()) {
+                out.allDirtyIds.insert(out.allDirtyIds.end(), regWaveDirtyIds.begin(), regWaveDirtyIds.end());
+                U32 dCnt = static_cast<U32>(regWaveDirtyIds.size());
+                regWaveDirtyVals.resize(dCnt);
+                const U32* dIds = regWaveDirtyIds.data();
+                I32* dVals = regWaveDirtyVals.data();
+                parRun(dCnt, 2048u, [&](size_t lo, size_t hi) {
+                    for (size_t i = lo; i < hi; ++i) dVals[i] = G.occ[dIds[i]];
+                });
+                fidesGpuApplyOccDeltasDev(fixedDev, dIds, dVals, dCnt);
+                regWaveDirtyIds.clear();
+            }
 
             FidesGpuWaveParams wp{};
             wp.shareWeight = shareWeight;
@@ -4216,7 +4630,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             std::thread prePickThread;
             const U32 preMaxMidWaves = (routeIter == 3) ? 200u : 128u;
             if (passTier == 1 && routeIter <= 4
-                    && !(routeIter >= 3 && (gpuWaves + 1u) >= preMaxMidWaves)
+                    && !(routeIter >= 3 && (out.gWaves + 1u) >= preMaxMidWaves)
                     && remainingItems > targetWave * 2u && liveHeapNets > 0) {
                 launchedPrePick = true;
                 prePickThread = std::thread([&]() {
@@ -4226,7 +4640,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
 
             bool launchedCpuOverlap = false;
             std::thread cpuOverlapThread;
-            if (passTier == 3 && tierB1Mode == 0 && !cpuOverlapDone
+            if (!regionMode && passTier == 3 && tierB1Mode == 0 && !cpuOverlapDone
                     && cpuOverlapItems != nullptr && !cpuOverlapItems->empty()) {
                 launchedCpuOverlap = true;
                 if (++G.waveCommitEpoch == 0u) {
@@ -4239,24 +4653,37 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 });
             }
 
-            fidesGpuRunParallelDevs([](int d, void* u) {
-                auto* c = static_cast<MultiLaunchCtx*>(u);
-                if (c->devB[d] == 0u) {
-                    c->devUsedWords[d] = 0u;
-                    c->devOk[d] = true;
-                    return;
-                }
-                if (!c->useTierB1) {
-                    c->devOk[d] = fidesGpuRunTierADev(d, c->wp, c->devB[d], c->devSameCursor[d],
-                                                      c->outPathsWords, c->devOldCursor[d], &c->devUsedWords[d]);
+            if (regionMode) {
+                if (devB[fixedDev] == 0u) {
+                    devUsedWords[fixedDev] = 0u;
+                    devOk[fixedDev] = true;
+                } else if (!useTierB1) {
+                    devOk[fixedDev] = fidesGpuRunTierADev(fixedDev, wp, devB[fixedDev], devSameCursor[fixedDev],
+                                                          outPathsWords, devOldCursor[fixedDev], &devUsedWords[fixedDev]);
                 } else {
-                    c->devOk[d] = fidesGpuRunTierB1WideDev(d, c->wp, c->tierB1Mode, c->devB[d], c->devSameCursor[d],
-                                                           c->outPathsWords, c->devOldCursor[d], &c->devUsedWords[d], nullptr);
+                    devOk[fixedDev] = fidesGpuRunTierB1WideDev(fixedDev, wp, tierB1Mode, devB[fixedDev], devSameCursor[fixedDev],
+                                                               outPathsWords, devOldCursor[fixedDev], &devUsedWords[fixedDev], nullptr);
                 }
-            }, &mctx);
-            gpuNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
+            } else {
+                fidesGpuRunParallelDevs([](int d, void* u) {
+                    auto* c = static_cast<MultiLaunchCtx*>(u);
+                    if (c->devB[d] == 0u) {
+                        c->devUsedWords[d] = 0u;
+                        c->devOk[d] = true;
+                        return;
+                    }
+                    if (!c->useTierB1) {
+                        c->devOk[d] = fidesGpuRunTierADev(d, c->wp, c->devB[d], c->devSameCursor[d],
+                                                          c->outPathsWords, c->devOldCursor[d], &c->devUsedWords[d]);
+                    } else {
+                        c->devOk[d] = fidesGpuRunTierB1WideDev(d, c->wp, c->tierB1Mode, c->devB[d], c->devSameCursor[d],
+                                                               c->outPathsWords, c->devOldCursor[d], &c->devUsedWords[d], nullptr);
+                    }
+                }, &mctx);
+            }
+            out.gNs += std::chrono::duration_cast<std::chrono::nanoseconds>(
                     std::chrono::steady_clock::now() - tGpu0).count();
-            ++gpuWaves;
+            ++out.gWaves;
 
             if (launchedCpuOverlap && cpuOverlapThread.joinable()) {
                 cpuOverlapThread.join();
@@ -4266,40 +4693,47 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
 
             if (launchedPrePick && prePickThread.joinable()) {
                 prePickThread.join();
-                skippedLive += preSkippedLive;
+                out.skipped += preSkippedLive;
                 if (!preFallbackItems.empty()) {
-                    cpuFallbackItems.insert(cpuFallbackItems.end(), preFallbackItems.begin(), preFallbackItems.end());
+                    out.fallback.insert(out.fallback.end(), preFallbackItems.begin(), preFallbackItems.end());
                 }
                 hasPrePicked = !pickedActIdx.empty();
             }
 
             bool anyGpuOk = false;
-            for (int d = 0; d < numDevs; ++d) {
+            for (int d = startDev; d < endDev; ++d) {
                 if (devB[d] > 0u && devOk[d]) { anyGpuOk = true; break; }
             }
             if (!anyGpuOk) {
                 for (U32 k = 0; k < B; ++k) {
                     I32 aIdx = waveActIdx[k];
                     if (wasRipped[k]) restoreRipped(static_cast<U32>(activeConns[aIdx]));
-                    cpuFallbackItems.push_back(aIdx);
-                    ++gpuFallbacks;
+                    out.fallback.push_back(aIdx);
+                    ++out.gFb;
                 }
                 continue;
             }
 
-            // Phase 4A: 35-core parallel path validation + atomic U64 waveCommitKey claim
+            // Phase 4A: parallel path validation + atomic U64 waveCommitKey claim
             auto tP4A0 = std::chrono::steady_clock::now();
-            if (!launchedCpuOverlap) {
-                if (++G.waveCommitEpoch == 0u) {
-                    std::memset(G.waveCommitKey.data(), 0, G.waveCommitKey.size() * sizeof(U64));
-                    G.waveCommitEpoch = 1u;
+            U32 curCommitEpoch = 0u;
+            if (regionMode) {
+                regCommitSeq += 2u;
+                curCommitEpoch = commitEpochSeed + regCommitSeq;
+                out.commitEpochEnd = curCommitEpoch;
+            } else {
+                if (!launchedCpuOverlap) {
+                    if (++G.waveCommitEpoch == 0u) {
+                        std::memset(G.waveCommitKey.data(), 0, G.waveCommitKey.size() * sizeof(U64));
+                        G.waveCommitEpoch = 1u;
+                    }
                 }
+                curCommitEpoch = G.waveCommitEpoch;
             }
-            const U32 curCommitEpoch = G.waveCommitEpoch;
 
             itemAct.assign(B, PA_WIN);
             itemSawSame.assign(B, 0u);
-            EXEC.parallelFor(B, 128u, [&](size_t lo, size_t hi) {
+            parRun(B, 128u, [&](size_t lo, size_t hi) {
                 for (size_t k = lo; k < hi; ++k) {
                     int d = itemDev[k];
                     if (!devOk[d]) { itemAct[k] = PA_BAD_FALLBACK; continue; }
@@ -4366,69 +4800,75 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 int d = itemDev[k];
                 if (!devOk[d]) {
                     if (wasRipped[k]) restoreRipped(cIdx);
-                    cpuFallbackItems.push_back(aIdx);
-                    ++gpuFallbacks;
+                    out.fallback.push_back(aIdx);
+                    ++out.gFb;
                     continue;
                 }
                 const FidesGpuResult& res = devBufs[d].results[itemLk[k]];
-                totalPops += res.pops;
-                gpuPops += res.pops;
+                out.pops += res.pops;
+                out.gPops += res.pops;
                 G.lastPops[cIdx] = res.pops;
 
                 switch (itemAct[k]) {
                     case PA_NO_PATH:
                         if (wasRipped[k]) restoreRipped(cIdx);
-                        if (bumpWiden(aIdx, 1)) retries.push_back(aIdx);
-                        else ++unroutableCount;
+                        if (regionMode) {
+                            out.fallback.push_back(aIdx);
+                            ++out.gFb;
+                        } else if (bumpWiden(aIdx, 1)) {
+                            retries.push_back(aIdx);
+                        } else {
+                            ++out.unrout;
+                        }
                         break;
                     case PA_CROSSED_BUDGET:
                         if (wasRipped[k]) restoreRipped(cIdx);
                         if (passTier == 1) {
-                            baseHeavyQueue.push_back(aIdx);
-                            ++baseHeavyCount;
+                            out.baseHeavy.push_back(aIdx);
+                            ++out.baseH;
                         } else if (passTier == 2) {
                             bumpWiden(aIdx, 3);
-                            relaxedQueue.push_back(aIdx);
-                            ++relaxedHeavyCount;
+                            out.relaxed.push_back(aIdx);
+                            ++out.relH;
                         } else {
                             G.gpuOverflowed[cIdx] = 1u;
-                            cpuFallbackItems.push_back(aIdx);
-                            ++gpuFallbacks;
+                            out.fallback.push_back(aIdx);
+                            ++out.gFb;
                         }
                         break;
                     case PA_HASH_OVERFLOW:
                         if (wasRipped[k]) restoreRipped(cIdx);
-                        if (tierB1Mode == 0) ++gpuOverflows;
+                        if (tierB1Mode == 0) ++out.gOv;
                         if (passTier == 1) {
-                            baseHeavyQueue.push_back(aIdx);
-                            ++baseHeavyCount;
+                            out.baseHeavy.push_back(aIdx);
+                            ++out.baseH;
                         } else if (passTier == 2) {
-                            relaxedQueue.push_back(aIdx);
-                            ++relaxedHeavyCount;
+                            out.relaxed.push_back(aIdx);
+                            ++out.relH;
                         } else {
                             if (tierB1Mode < 2) {
                                 wideRetryItems.push_back(aIdx);
                             } else {
                                 G.gpuOverflowed[cIdx] = 1u;
-                                cpuFallbackItems.push_back(aIdx);
-                                ++gpuFallbacks;
+                                out.fallback.push_back(aIdx);
+                                ++out.gFb;
                             }
                         }
                         break;
                     case PA_BAD_FALLBACK:
                         if (wasRipped[k]) restoreRipped(cIdx);
-                        cpuFallbackItems.push_back(aIdx);
-                        ++gpuFallbacks;
+                        out.fallback.push_back(aIdx);
+                        ++out.gFb;
                         break;
                     case PA_CONFLICT:
-                        ++conflictRetries;
+                        ++out.retries;
                         if (wasRipped[k]) restoreRipped(cIdx);
                         if (retryStreak[aIdx] < 250) ++retryStreak[aIdx];
-                        if (retryStreak[aIdx] >= 4) cpuFallbackItems.push_back(aIdx);
+                        if (retryStreak[aIdx] >= 4) out.fallback.push_back(aIdx);
                         else retries.push_back(aIdx);
                         break;
                     case PA_WIN: {
-                        if (itemSawSame[k]) ++sameNetOk;
+                        if (itemSawSame[k]) ++out.sameOk;
                         U32 netId = G.conns[cIdx].netId;
                         if (commitNetHead[netId] < 0) {
                             waveCommitNets.push_back(netId);
@@ -4438,22 +4878,22 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                             nextCommitInNet[commitNetTail[netId]] = static_cast<I32>(k);
                             commitNetTail[netId] = static_cast<I32>(k);
                         }
-                        ++routedCount;
-                        ++parallelCommits;
-                        ++gpuCommits;
-                        if (tierB1Mode > 0) ++gpuWideOk;
+                        ++out.routed;
+                        ++out.parCommits;
+                        ++out.gCommits;
+                        if (tierB1Mode > 0) ++out.gWideOk;
                         break;
                     }
                 }
             }
-            hostP4AS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tP4A0).count();
+            out.p4aS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tP4A0).count();
 
-            // Phase 4B (32-core net-parallel scope update) + Phase 4C (32-shard node-disjoint parallel occ update)
+            // Phase 4B (net-parallel scope update) + Phase 4C (shard node-disjoint parallel occ update)
             const size_t numCN = waveCommitNets.size();
             if (numCN > 0u) {
                 auto tP4B0 = std::chrono::steady_clock::now();
                 const size_t numSlices = std::min<size_t>(numCN, P4_SLICES);
-                EXEC.parallelFor(numSlices, 1u, [&](size_t sLo, size_t sHi) {
+                parRun(numSlices, 1u, [&](size_t sLo, size_t sHi) {
                     for (size_t s = sLo; s < sHi; ++s) {
                         for (size_t b = 0; b < P4_SHARDS; ++b) shardSliceDeltas[b * P4_SLICES + s].clear();
                         auto pushShardDelta = [&](U32 id, I32 d) {
@@ -4464,6 +4904,8 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                         size_t n1 = ((s + 1u) * numCN) / numSlices;
                         for (size_t ni = n0; ni < n1; ++ni) {
                             U32 netId = waveCommitNets[ni];
+                            std::unique_lock<std::mutex> netLk;
+                            if (isNetShared(netId)) netLk = std::unique_lock<std::mutex>(g_regNetMtx[netId & 4095u]);
                             NetScopeData& sc = G.netScopes[netId];
                             for (I32 k = commitNetHead[netId]; k >= 0; k = nextCommitInNet[k]) {
                                 U32 cIdx = static_cast<U32>(activeConns[waveActIdx[k]]);
@@ -4490,11 +4932,18 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                     }
                 });
                 auto tP4B1 = std::chrono::steady_clock::now();
-                hostP4BS += std::chrono::duration<double>(tP4B1 - tP4B0).count();
+                out.p4bS += std::chrono::duration<double>(tP4B1 - tP4B0).count();
 
                 const bool trackDirty = G.gpuEnabled;
-                const U32 curDirtyEpoch = G.gpuDirtyOccEpoch;
-                EXEC.parallelFor(P4_SHARDS, 1u, [&](size_t bLo, size_t bHi) {
+                U32 curDirtyEpoch = 0u;
+                if (regionMode) {
+                    regDirtySeq += 2u;
+                    curDirtyEpoch = dirtyEpochSeed + regDirtySeq;
+                    out.dirtyEpochEnd = curDirtyEpoch;
+                } else {
+                    curDirtyEpoch = G.gpuDirtyOccEpoch;
+                }
+                parRun(P4_SHARDS, 1u, [&](size_t bLo, size_t bHi) {
                     for (size_t b = bLo; b < bHi; ++b) {
                         auto& dOut = shardDirtyIds[b];
                         auto& ovOut = shardOvEvents[b];
@@ -4522,58 +4971,73 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 size_t addDirty = 0u;
                 for (size_t b = 0; b < P4_SHARDS; ++b) addDirty += shardDirtyIds[b].size();
                 if (addDirty > 0u) {
-                    G.gpuDirtyOccIds.reserve(G.gpuDirtyOccIds.size() + addDirty);
-                    for (size_t b = 0; b < P4_SHARDS; ++b) {
-                        G.gpuDirtyOccIds.insert(G.gpuDirtyOccIds.end(), shardDirtyIds[b].begin(), shardDirtyIds[b].end());
-                        shardDirtyIds[b].clear();
-                    }
-                }
-                for (size_t b = 0; b < P4_SHARDS; ++b) {
-                    for (const auto& ev : shardOvEvents[b]) {
-                        const U32 id = ev.id;
-                        if (ev.before <= cap && ev.after > cap) {
-                            if (G.overusedPos[id] < 0) {
-                                G.overusedPos[id] = static_cast<I32>(G.overusedList.size());
-                                G.overusedList.push_back(id);
-                            }
-                        } else if (ev.before > cap && ev.after <= cap) {
-                            I32 pos = G.overusedPos[id];
-                            if (pos >= 0) {
-                                U32 backId = G.overusedList.back();
-                                if (static_cast<size_t>(pos) + 1u < G.overusedList.size()) {
-                                    G.overusedList[pos] = backId;
-                                    G.overusedPos[backId] = pos;
-                                }
-                                G.overusedList.pop_back();
-                                G.overusedPos[id] = -1;
-                            }
+                    if (regionMode) {
+                        regWaveDirtyIds.reserve(regWaveDirtyIds.size() + addDirty);
+                        for (size_t b = 0; b < P4_SHARDS; ++b) {
+                            regWaveDirtyIds.insert(regWaveDirtyIds.end(), shardDirtyIds[b].begin(), shardDirtyIds[b].end());
+                            shardDirtyIds[b].clear();
+                        }
+                    } else {
+                        G.gpuDirtyOccIds.reserve(G.gpuDirtyOccIds.size() + addDirty);
+                        for (size_t b = 0; b < P4_SHARDS; ++b) {
+                            G.gpuDirtyOccIds.insert(G.gpuDirtyOccIds.end(), shardDirtyIds[b].begin(), shardDirtyIds[b].end());
+                            shardDirtyIds[b].clear();
                         }
                     }
-                    shardOvEvents[b].clear();
                 }
-                hostP4CS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tP4B1).count();
+                if (regionMode) {
+                    for (size_t b = 0; b < P4_SHARDS; ++b) {
+                        for (const auto& ev : shardOvEvents[b]) out.ovCandidates.push_back(ev.id);
+                        shardOvEvents[b].clear();
+                    }
+                } else {
+                    for (size_t b = 0; b < P4_SHARDS; ++b) {
+                        for (const auto& ev : shardOvEvents[b]) {
+                            const U32 id = ev.id;
+                            if (ev.before <= cap && ev.after > cap) {
+                                if (G.overusedPos[id] < 0) {
+                                    G.overusedPos[id] = static_cast<I32>(G.overusedList.size());
+                                    G.overusedList.push_back(id);
+                                }
+                            } else if (ev.before > cap && ev.after <= cap) {
+                                I32 pos = G.overusedPos[id];
+                                if (pos >= 0) {
+                                    U32 backId = G.overusedList.back();
+                                    if (static_cast<size_t>(pos) + 1u < G.overusedList.size()) {
+                                        G.overusedList[pos] = backId;
+                                        G.overusedPos[backId] = pos;
+                                    }
+                                    G.overusedList.pop_back();
+                                    G.overusedPos[id] = -1;
+                                }
+                            }
+                        }
+                        shardOvEvents[b].clear();
+                    }
+                }
+                out.p4cS += std::chrono::duration<double>(std::chrono::steady_clock::now() - tP4B1).count();
             }
 
-            if (passTier == 1 && activeCount >= 100000) {
+            if (!regionMode && passTier == 1 && activeCount >= 100000) {
                 auto now = std::chrono::steady_clock::now();
                 double sinceLast = std::chrono::duration<double>(now - lastLogTime).count();
-                if (routedCount >= nextLogRouted || sinceLast >= 30.0) {
-                    while (nextLogRouted <= routedCount) nextLogRouted += 500000;
+                if (routedCount + out.routed >= nextLogRouted || sinceLast >= 30.0) {
+                    while (nextLogRouted <= routedCount + out.routed) nextLogRouted += 500000;
                     lastLogTime = now;
                     double elapsedS = std::chrono::duration<double>(now - tStarted).count();
                     fprintf(stdout,
                             "F4_V37_WAVE routed=%lld/%d skip=%lld gpu=%lld cpu=%lld retries=%lld same_ok=%lld overused=%zu pops=%lld gpu_pops=%lld gpu_ov=%lld gpu_fb=%lld gpu_s=%.2f t=%.1fs\n",
-                            static_cast<long long>(routedCount), activeCount,
-                            static_cast<long long>(skippedLive),
-                            static_cast<long long>(gpuCommits),
-                            static_cast<long long>(routedCount - gpuCommits),
-                            static_cast<long long>(conflictRetries),
-                            static_cast<long long>(sameNetOk),
-                            G.overusedList.size(), static_cast<long long>(totalPops),
-                            static_cast<long long>(gpuPops),
-                            static_cast<long long>(gpuOverflows),
-                            static_cast<long long>(gpuFallbacks),
-                            gpuNs / 1e9, elapsedS);
+                            static_cast<long long>(routedCount + out.routed), activeCount,
+                            static_cast<long long>(skippedLive + out.skipped),
+                            static_cast<long long>(gpuCommits + out.gCommits),
+                            static_cast<long long>((routedCount + out.routed) - (gpuCommits + out.gCommits)),
+                            static_cast<long long>(conflictRetries + out.retries),
+                            static_cast<long long>(sameNetOk + out.sameOk),
+                            G.overusedList.size(), static_cast<long long>(totalPops + out.pops),
+                            static_cast<long long>(gpuPops + out.gPops),
+                            static_cast<long long>(gpuOverflows + out.gOv),
+                            static_cast<long long>(gpuFallbacks + out.gFb),
+                            (gpuNs + out.gNs) / 1e9, elapsedS);
                     fflush(stdout);
                 }
             }
@@ -4584,8 +5048,8 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 for (I32 wa : wideRetryItems) {
                     G.gpuOverflowed[static_cast<U32>(activeConns[wa])] = 1u;
                 }
-                cpuFallbackItems.insert(cpuFallbackItems.end(), wideRetryItems.begin(), wideRetryItems.end());
-                gpuFallbacks += static_cast<I64>(wideRetryItems.size());
+                out.fallback.insert(out.fallback.end(), wideRetryItems.begin(), wideRetryItems.end());
+                out.gFb += static_cast<I64>(wideRetryItems.size());
                 wideRetryItems.clear();
                 break;
             }
@@ -4593,22 +5057,424 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             wideRetryItems.clear();
         }
 
-        if (!cpuOverlapDone && cpuOverlapItems != nullptr && !cpuOverlapItems->empty()) {
+        if (regionMode && !regWaveDirtyIds.empty()) {
+            out.allDirtyIds.insert(out.allDirtyIds.end(), regWaveDirtyIds.begin(), regWaveDirtyIds.end());
+            U32 dCnt = static_cast<U32>(regWaveDirtyIds.size());
+            regWaveDirtyVals.resize(dCnt);
+            const U32* dIds = regWaveDirtyIds.data();
+            I32* dVals = regWaveDirtyVals.data();
+            parRun(dCnt, 2048u, [&](size_t lo, size_t hi) {
+                for (size_t i = lo; i < hi; ++i) dVals[i] = G.occ[dIds[i]];
+            });
+            fidesGpuApplyOccDeltasDev(fixedDev, dIds, dVals, dCnt);
+            regWaveDirtyIds.clear();
+        }
+
+        if (!regionMode && !cpuOverlapDone && cpuOverlapItems != nullptr && !cpuOverlapItems->empty()) {
             G.gpuStampWaveEpoch = 0u;
             runDynamicPass(*cpuOverlapItems, curBudget, passTier);
         }
+    };
 
-        // Resolve any GPU fallbacks / tiny tail items cleanly on 35-core CPU in true LPT order!
-        if (!cpuFallbackItems.empty()) {
-            if (passTier >= 2 && cpuFallbackItems.size() > 1u) {
-                std::sort(cpuFallbackItems.begin(), cpuFallbackItems.end(), [&](I32 a, I32 b) {
-                    return G.lastPops[activeConns[a]] > G.lastPops[activeConns[b]];
-                });
-            } else if (passTier == 1 && routeIter >= 3 && cpuFallbackItems.size() > 1u) {
-                std::sort(cpuFallbackItems.begin(), cpuFallbackItems.end());
-            }
-            runDynamicPass(cpuFallbackItems, curBudget, passTier);
+    auto mergeGpuPassOut = [&](const GpuPassOut& o) {
+        if (!o.baseHeavy.empty()) baseHeavyQueue.insert(baseHeavyQueue.end(), o.baseHeavy.begin(), o.baseHeavy.end());
+        if (!o.relaxed.empty()) relaxedQueue.insert(relaxedQueue.end(), o.relaxed.begin(), o.relaxed.end());
+        if (!o.mega.empty()) megaQueue.insert(megaQueue.end(), o.mega.begin(), o.mega.end());
+        routedCount += o.routed;
+        parallelCommits += o.parCommits;
+        conflictRetries += o.retries;
+        sameNetOk += o.sameOk;
+        baseHeavyCount += o.baseH;
+        relaxedHeavyCount += o.relH;
+        fallbackCount += o.fb;
+        unroutableCount += o.unrout;
+        totalPops += o.pops;
+        skippedLive += o.skipped;
+        gpuCommits += o.gCommits;
+        gpuPops += o.gPops;
+        gpuNs += o.gNs;
+        gpuWaves += o.gWaves;
+        gpuOverflows += o.gOv;
+        gpuFallbacks += o.gFb;
+        gpuWideOk += o.gWideOk;
+        megaUploadCount += o.megaUp;
+        hostPickS += o.pickS;
+        hostMetaS += o.metaS;
+        hostPackS += o.packS;
+        hostP4AS += o.p4aS;
+        hostP4BS += o.p4bS;
+        hostP4CS += o.p4cS;
+        megaPackS += o.mPackS;
+        megaGpuS += o.mGpuS;
+        hostMetaLoopS += o.mlS;
+        hostMetaSortS += o.msS;
+        hostMetaUpWrapS += o.muS;
+        hostMetaLiveS += o.mvS;
+        hostMetaBuildS += o.mbS;
+        hostMetaDirtyN += o.mdN;
+        hostMetaPatchN += o.mpN;
+        hostMetaWTot += o.mwTot;
+        hostMetaPTot += o.mpTot;
+    };
+
+    auto finishFallbacks = [&](std::vector<I32>& fbItems, int curBudget, int passTier) {
+        if (fbItems.empty()) return;
+        if (passTier >= 2 && fbItems.size() > 1u) {
+            std::sort(fbItems.begin(), fbItems.end(), [&](I32 a, I32 b) {
+                return G.lastPops[activeConns[a]] > G.lastPops[activeConns[b]];
+            });
+        } else if (passTier == 1 && routeIter >= 3 && fbItems.size() > 1u) {
+            std::sort(fbItems.begin(), fbItems.end());
         }
+        runDynamicPass(fbItems, curBudget, passTier);
+    };
+
+    auto runGpuPass = [&](const std::vector<I32>& passItems, int curBudget, int passTier,
+                          const std::vector<I32>* cpuOverlapItems = nullptr, bool forceTierB1 = false) {
+        if (G.gpuEnabled && passTier == 1 && routeIter <= 2 && !forceTierB1
+                && passItems.size() >= 32768u && G.gpuCount >= 2) {
+            const size_t nPass = passItems.size();
+            struct ItemBBox {
+                I64 work;
+                I32 qx0, qy0, qx1, qy1;
+                I32 nx0, ny0, nx1, ny1;
+                uint8_t validB;
+                uint8_t cross;
+                uint8_t live;
+            };
+            std::vector<ItemBBox> ib(nPass);
+            EXEC.parallelFor(nPass, 4096u, [&](size_t lo, size_t hi) {
+                for (size_t i = lo; i < hi; ++i) {
+                    I32 aIdx = passItems[i];
+                    U32 cIdx = static_cast<U32>(activeConns[aIdx]);
+                    if (!shouldRouteLive(cIdx)) {
+                        ib[i].live = 0u;
+                        continue;
+                    }
+                    const ConnData& cd = G.conns[cIdx];
+                    ItemBBox b{};
+                    b.live = 1u;
+                    b.cross = (cd.flags & 8u) ? 1u : 0u;
+                    b.work = (G.lastPops[cIdx] > 0)
+                            ? G.lastPops[cIdx]
+                            : static_cast<I64>(128 + std::min<I32>(256, cd.doubleHpwl));
+                    bool useB = (buse[aIdx] != 0u);
+                    bool useOrigB = (cd.flags & 2u) != 0u;
+                    if (!useB && !useOrigB) {
+                        b.validB = 0u;
+                    } else {
+                        b.validB = 1u;
+                        b.qx0 = useB ? (useOrigB ? std::max(bx0[aIdx], cd.origXmin) : bx0[aIdx]) : cd.origXmin;
+                        b.qy0 = useB ? (useOrigB ? std::max(by0[aIdx], cd.origYmin) : by0[aIdx]) : cd.origYmin;
+                        b.qx1 = useB ? (useOrigB ? std::min(bx1[aIdx], cd.origXmax) : bx1[aIdx]) : cd.origXmax;
+                        b.qy1 = useB ? (useOrigB ? std::min(by1[aIdx], cd.origYmax) : by1[aIdx]) : cd.origYmax;
+                    }
+                    const NodeGeomHot& gs = G.geomHot[cd.src];
+                    const NodeGeomHot& gk = G.geomHot[cd.sink];
+                    I32 nx0 = std::min<I32>({static_cast<I32>(gs.endTileX), static_cast<I32>(gk.endTileX), cd.sinkBeginX});
+                    I32 nx1 = std::max<I32>({static_cast<I32>(gs.endTileX), static_cast<I32>(gk.endTileX), cd.sinkBeginX});
+                    I32 ny0 = std::min<I32>({static_cast<I32>(gs.endTileYRaw), static_cast<I32>(gs.tileY),
+                                             static_cast<I32>(gk.endTileYRaw), static_cast<I32>(gk.tileY), cd.sinkBeginY});
+                    I32 ny1 = std::max<I32>({static_cast<I32>(gs.endTileYRaw), static_cast<I32>(gs.tileY),
+                                             static_cast<I32>(gk.endTileYRaw), static_cast<I32>(gk.tileY), cd.sinkBeginY});
+                    if (G.connRouted[cIdx]) {
+                        const auto& op = G.connPaths[cIdx];
+                        for (size_t j = 1; j + 1 < op.size(); ++j) {
+                            const NodeGeomHot& gh = G.geomHot[op[j]];
+                            I32 x = static_cast<I32>(gh.endTileX);
+                            I32 y0 = std::min(static_cast<I32>(gh.endTileYRaw), static_cast<I32>(gh.tileY));
+                            I32 y1 = std::max(static_cast<I32>(gh.endTileYRaw), static_cast<I32>(gh.tileY));
+                            if (x < nx0) nx0 = x;
+                            if (x > nx1) nx1 = x;
+                            if (y0 < ny0) ny0 = y0;
+                            if (y1 > ny1) ny1 = y1;
+                        }
+                    }
+                    b.nx0 = nx0; b.ny0 = ny0; b.nx1 = nx1; b.ny1 = ny1;
+                    ib[i] = b;
+                }
+            });
+
+            std::vector<U32> livePos;
+            livePos.reserve(nPass);
+            I64 totalWork = 0;
+            for (size_t i = 0; i < nPass; ++i) {
+                if (ib[i].live) {
+                    livePos.push_back(static_cast<U32>(i));
+                    totalWork += ib[i].work;
+                }
+            }
+
+            if (livePos.size() >= 32768u) {
+                const I32 sllMargin = G.maxSllSpanY + 4;
+                std::vector<I32> sampleX, sampleY;
+                const size_t stride = std::max<size_t>(1u, livePos.size() / 200000u);
+                sampleX.reserve((livePos.size() + stride - 1u) / stride);
+                sampleY.reserve((livePos.size() + stride - 1u) / stride);
+                for (size_t k = 0; k < livePos.size(); k += stride) {
+                    const ItemBBox& b = ib[livePos[k]];
+                    if (!b.validB) continue;
+                    sampleX.push_back((b.qx0 + b.qx1) >> 1);
+                    sampleY.push_back((b.qy0 + b.qy1) >> 1);
+                }
+                std::sort(sampleX.begin(), sampleX.end());
+                std::sort(sampleY.begin(), sampleY.end());
+
+                char bestAxis = 'X';
+                I32 bestLo = 0, bestHi = 0;
+                I32 bestCrossLo = 0, bestCrossHi = 0;
+                I64 bestMinW = 0, bestW0 = 0, bestW1 = 0;
+                size_t bestC0 = 0, bestC1 = 0;
+                auto evalCuts = [&](char ax, const std::vector<I32>& samples) {
+                    if (samples.size() < 64u) return;
+                    for (int qi = 1; qi <= 9; ++qi) {
+                        size_t idx = (samples.size() * static_cast<size_t>(qi)) / 10u;
+                        I32 cut = samples[std::min(idx, samples.size() - 1u)];
+                        I32 lo = cut - 1;
+                        I32 hi = cut + 1;
+                        I32 clo = cut - sllMargin;
+                        I32 chi = cut + sllMargin;
+                        I64 w0 = 0, w1 = 0;
+                        size_t c0 = 0, c1 = 0;
+                        for (size_t k = 0; k < livePos.size(); k += stride) {
+                            const ItemBBox& b = ib[livePos[k]];
+                            if (!b.validB) continue;
+                            if (ax == 'X') {
+                                if (b.qx1 <= lo && b.nx1 < lo) { w0 += b.work; ++c0; }
+                                else if (b.qx0 >= hi && b.nx0 > hi) { w1 += b.work; ++c1; }
+                            } else {
+                                I32 mlo = b.cross ? clo : lo;
+                                I32 mhi = b.cross ? chi : hi;
+                                if (b.qy1 <= mlo && b.ny1 < mlo) { w0 += b.work; ++c0; }
+                                else if (b.qy0 >= mhi && b.ny0 > mhi) { w1 += b.work; ++c1; }
+                            }
+                        }
+                        I64 mnW = std::min(w0, w1) * static_cast<I64>(stride);
+                        if (mnW > bestMinW) {
+                            bestMinW = mnW;
+                            bestAxis = ax;
+                            bestLo = lo;
+                            bestHi = hi;
+                            bestCrossLo = clo;
+                            bestCrossHi = chi;
+                            bestW0 = w0 * static_cast<I64>(stride);
+                            bestW1 = w1 * static_cast<I64>(stride);
+                            bestC0 = c0 * stride;
+                            bestC1 = c1 * stride;
+                        }
+                    }
+                };
+                evalCuts('X', sampleX);
+                evalCuts('Y', sampleY);
+
+                const size_t approxBound = (livePos.size() > bestC0 + bestC1) ? (livePos.size() - bestC0 - bestC1) : 0u;
+                if (bestMinW * 4 >= totalWork && approxBound * 4u <= livePos.size()) {
+                    skippedLive += static_cast<I64>(nPass - livePos.size());
+                    std::vector<I32> reg0Items, reg1Items, boundItems;
+                    reg0Items.reserve(livePos.size() / 2u);
+                    reg1Items.reserve(livePos.size() / 2u);
+                    boundItems.reserve(livePos.size() / 4u);
+                    std::vector<uint8_t> netRegMask(numNets, 0u);
+                    for (U32 pi : livePos) {
+                        const ItemBBox& b = ib[pi];
+                        I32 aIdx = passItems[pi];
+                        U32 nid = G.conns[activeConns[aIdx]].netId;
+                        uint8_t r = 2u;
+                        if (b.validB) {
+                            if (bestAxis == 'X') {
+                                if (b.qx1 <= bestLo && b.nx1 < bestLo) r = 0u;
+                                else if (b.qx0 >= bestHi && b.nx0 > bestHi) r = 1u;
+                            } else {
+                                I32 mlo = b.cross ? bestCrossLo : bestLo;
+                                I32 mhi = b.cross ? bestCrossHi : bestHi;
+                                if (b.qy1 <= mlo && b.ny1 < mlo) r = 0u;
+                                else if (b.qy0 >= mhi && b.ny0 > mhi) r = 1u;
+                            }
+                        }
+                        if (r == 0u) {
+                            reg0Items.push_back(aIdx);
+                            netRegMask[nid] |= 1u;
+                        } else if (r == 1u) {
+                            reg1Items.push_back(aIdx);
+                            netRegMask[nid] |= 2u;
+                        } else {
+                            boundItems.push_back(aIdx);
+                        }
+                    }
+                    std::vector<uint8_t> netShared(numNets, 0u);
+                    for (U32 nid = 0; nid < numNets; ++nid) {
+                        if (netRegMask[nid] == 3u) netShared[nid] = 1u;
+                    }
+
+                    auto clearAllMegaCache = [&]() {
+                        for (int s = 0; s < 1024; ++s) {
+                            U32 on = G.megaCache[s].netId;
+                            if (on < numNets) {
+                                NetScopeData& osc = G.netScopes[on];
+                                osc.megaSlot = -1;
+                                osc.megaSyncTracked = false;
+                                osc.megaDirtyIdx.clear();
+                                for (int r = 0; r < 2; ++r) {
+                                    osc.megaSlotReg[r] = -1;
+                                    osc.megaSyncTrackedReg[r] = false;
+                                    osc.megaDirtyReg[r].clear();
+                                }
+                            }
+                            G.megaCache[s] = {};
+                        }
+                    };
+
+                    flushGpuOccDeltas();
+                    clearAllMegaCache();
+
+                    if (G.waveCommitEpoch >= 3800000000u) {
+                        std::memset(G.waveCommitKey.data(), 0, G.waveCommitKey.size() * sizeof(U64));
+                        G.waveCommitEpoch = 1u;
+                    }
+                    if (G.gpuDirtyOccEpoch >= 3800000000u) {
+                        std::memset(G.gpuDirtyOccStamp.data(), 0, G.gpuDirtyOccStamp.size() * sizeof(U32));
+                        G.gpuDirtyOccEpoch = 1u;
+                    }
+                    U32 commitBase = (G.waveCommitEpoch + 2u) & ~1u;
+                    U32 dirtyBase = (G.gpuDirtyOccEpoch + 2u) & ~1u;
+
+                    // Route mutually isolated reg0 || reg1 FIRST, preserving HPWL_FIRST local-before-long ordering
+                    g_regPools[0].init(15);
+                    g_regPools[1].init(15);
+                    GpuPassOut out0, out1;
+                    double reg0S = 0.0, reg1S = 0.0;
+                    std::thread t0([&]() {
+                        auto tw0 = std::chrono::steady_clock::now();
+                        runGpuPassImpl(reg0Items, curBudget, passTier, nullptr, false,
+                                       0, &g_regPools[0], 0u, 512u, commitBase + 0u, dirtyBase + 0u, &netShared, out0);
+                        reg0S = std::chrono::duration<double>(std::chrono::steady_clock::now() - tw0).count();
+                    });
+                    std::thread t1([&]() {
+                        auto tw1 = std::chrono::steady_clock::now();
+                        runGpuPassImpl(reg1Items, curBudget, passTier, nullptr, false,
+                                       1, &g_regPools[1], 512u, 512u, commitBase + 1u, dirtyBase + 1u, &netShared, out1);
+                        reg1S = std::chrono::duration<double>(std::chrono::steady_clock::now() - tw1).count();
+                    });
+                    t0.join();
+                    t1.join();
+
+                    auto tSync0 = std::chrono::steady_clock::now();
+                    G.waveCommitEpoch = std::max<U32>(commitBase + 2u, std::max(out0.commitEpochEnd, out1.commitEpochEnd) + 2u);
+                    G.gpuDirtyOccEpoch = std::max<U32>(dirtyBase + 2u, std::max(out0.dirtyEpochEnd, out1.dirtyEpochEnd) + 2u);
+
+                    std::vector<U32> uniqIds0, uniqIds1;
+                    std::vector<I32> uniqVals0, uniqVals1;
+                    if (!out0.allDirtyIds.empty()) {
+                        U32 ep0 = ++G.gpuDirtyOccEpoch;
+                        uniqIds0.reserve(out0.allDirtyIds.size());
+                        for (U32 id : out0.allDirtyIds) {
+                            if (G.gpuDirtyOccStamp[id] != ep0) {
+                                G.gpuDirtyOccStamp[id] = ep0;
+                                uniqIds0.push_back(id);
+                            }
+                        }
+                        uniqVals0.resize(uniqIds0.size());
+                        EXEC.parallelFor(uniqIds0.size(), 4096u, [&](size_t lo, size_t hi) {
+                            for (size_t i = lo; i < hi; ++i) uniqVals0[i] = G.occ[uniqIds0[i]];
+                        });
+                    }
+                    if (!out1.allDirtyIds.empty()) {
+                        U32 ep1 = ++G.gpuDirtyOccEpoch;
+                        uniqIds1.reserve(out1.allDirtyIds.size());
+                        for (U32 id : out1.allDirtyIds) {
+                            if (G.gpuDirtyOccStamp[id] != ep1) {
+                                G.gpuDirtyOccStamp[id] = ep1;
+                                uniqIds1.push_back(id);
+                            }
+                        }
+                        uniqVals1.resize(uniqIds1.size());
+                        EXEC.parallelFor(uniqIds1.size(), 4096u, [&](size_t lo, size_t hi) {
+                            for (size_t i = lo; i < hi; ++i) uniqVals1[i] = G.occ[uniqIds1[i]];
+                        });
+                    }
+                    if (!uniqIds0.empty() || !uniqIds1.empty()) {
+                        struct PeerSyncCtx {
+                            const U32* ids0; const I32* vals0; U32 cnt0;
+                            const U32* ids1; const I32* vals1; U32 cnt1;
+                        } pctx{
+                            uniqIds0.data(), uniqVals0.data(), static_cast<U32>(uniqIds0.size()),
+                            uniqIds1.data(), uniqVals1.data(), static_cast<U32>(uniqIds1.size())
+                        };
+                        fidesGpuRunParallelDevs([](int d, void* u) {
+                            auto* c = static_cast<PeerSyncCtx*>(u);
+                            if (d == 1 && c->cnt0 > 0u) fidesGpuApplyOccDeltasDev(1, c->ids0, c->vals0, c->cnt0);
+                            if (d == 0 && c->cnt1 > 0u) fidesGpuApplyOccDeltasDev(0, c->ids1, c->vals1, c->cnt1);
+                        }, &pctx);
+                    }
+                    if (++G.gpuDirtyOccEpoch == 0u) {
+                        std::memset(G.gpuDirtyOccStamp.data(), 0, G.gpuDirtyOccStamp.size() * sizeof(U32));
+                        G.gpuDirtyOccEpoch = 1u;
+                    }
+
+                    auto applyOvCandidates = [&](const std::vector<U32>& cands) {
+                        for (U32 id : cands) {
+                            bool isOv = (G.occ[id] > cap);
+                            I32 pos = G.overusedPos[id];
+                            if (isOv && pos < 0) {
+                                G.overusedPos[id] = static_cast<I32>(G.overusedList.size());
+                                G.overusedList.push_back(id);
+                            } else if (!isOv && pos >= 0) {
+                                U32 backId = G.overusedList.back();
+                                if (static_cast<size_t>(pos) + 1u < G.overusedList.size()) {
+                                    G.overusedList[pos] = backId;
+                                    G.overusedPos[backId] = pos;
+                                }
+                                G.overusedList.pop_back();
+                                G.overusedPos[id] = -1;
+                            }
+                        }
+                    };
+                    applyOvCandidates(out0.ovCandidates);
+                    applyOvCandidates(out1.ovCandidates);
+                    clearAllMegaCache();
+                    mergeGpuPassOut(out0);
+                    mergeGpuPassOut(out1);
+                    double syncS = std::chrono::duration<double>(std::chrono::steady_clock::now() - tSync0).count();
+
+                    auto tBound0 = std::chrono::steady_clock::now();
+                    GpuPassOut outB;
+                    if (!boundItems.empty()) {
+                        runGpuPassImpl(boundItems, curBudget, passTier, nullptr, false,
+                                       -1, nullptr, 0u, 1024u, 0u, 0u, nullptr, outB);
+                        mergeGpuPassOut(outB);
+                    }
+                    double boundS = std::chrono::duration<double>(std::chrono::steady_clock::now() - tBound0).count();
+
+                    std::vector<I32> allFb;
+                    allFb.reserve(out0.fallback.size() + out1.fallback.size() + outB.fallback.size());
+                    allFb.insert(allFb.end(), out0.fallback.begin(), out0.fallback.end());
+                    allFb.insert(allFb.end(), out1.fallback.begin(), out1.fallback.end());
+                    allFb.insert(allFb.end(), outB.fallback.begin(), outB.fallback.end());
+                    finishFallbacks(allFb, curBudget, passTier);
+
+                    fprintf(stdout,
+                            "F4_V95_SPATIAL_SPLIT iter=%d axis=%c cut=[%d,%d] reg0=%zu reg1=%zu bound=%zu reg0_s=%.2f reg1_s=%.2f sync_s=%.2f bound_s=%.2f\n",
+                            routeIter, bestAxis, bestLo, bestHi,
+                            reg0Items.size(), reg1Items.size(), boundItems.size(),
+                            reg0S, reg1S, syncS, boundS);
+                    fflush(stdout);
+                    return;
+                } else {
+                    fprintf(stdout,
+                            "F4_V95_SPLIT_SKIP iter=%d axis=%c cut=[%d,%d] c0=%zu c1=%zu cb=%zu w0=%lld w1=%lld totW=%lld\n",
+                            routeIter, bestAxis, bestLo, bestHi,
+                            bestC0, bestC1, approxBound,
+                            static_cast<long long>(bestW0), static_cast<long long>(bestW1), static_cast<long long>(totalWork));
+                    fflush(stdout);
+                }
+            }
+        }
+
+        GpuPassOut out;
+        runGpuPassImpl(passItems, curBudget, passTier, cpuOverlapItems, forceTierB1,
+                       -1, nullptr, 0u, 1024u, 0u, 0u, nullptr, out);
+        mergeGpuPassOut(out);
+        finishFallbacks(out.fallback, curBudget, passTier);
     };
 
     // v37.1 Heterogeneous Split (Route B + proven v36 Tier-B1 8M -> 35-core CPU HOT fast fallback):

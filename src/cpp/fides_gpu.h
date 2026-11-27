@@ -151,6 +151,7 @@ struct FidesGpuMegaUpload {
     uint32_t cap;
 };
 bool fidesGpuUploadMegaScopesBatch(const FidesGpuMegaUpload* items, uint32_t count);
+bool fidesGpuUploadMegaScopesBatchDev(int dev, const FidesGpuMegaUpload* items, uint32_t count);
 int fidesGpuUploadMegaScope(int slot, const uint32_t* keys, const int32_t* counts, uint32_t cap);
 
 struct alignas(16) FidesGpuMegaPatch {
@@ -162,6 +163,7 @@ struct alignas(16) FidesGpuMegaPatch {
 static_assert(sizeof(FidesGpuMegaPatch) == 16, "FidesGpuMegaPatch must be 16 bytes");
 
 bool fidesGpuApplyMegaPatches(const FidesGpuMegaPatch* patches, uint32_t count);
+bool fidesGpuApplyMegaPatchesDev(int dev, const FidesGpuMegaPatch* patches, uint32_t count);
 
 // Tier-A: High-parallel Warp-per-Connection (32 threads/conn, persistent dynamic work-stealing)
 bool fidesGpuRunTierA(
@@ -211,6 +213,7 @@ bool fidesGpuAcquireWaveBufsDev(
     FidesGpuPinnedWaveBufs* outBufs);
 
 bool fidesGpuApplyOccDeltasMulti(const uint32_t* nodeIds, const int32_t* newOccs, uint32_t count);
+bool fidesGpuApplyOccDeltasDev(int dev, const uint32_t* nodeIds, const int32_t* newOccs, uint32_t count);
 
 bool fidesGpuRunTierADev(
     int dev,
