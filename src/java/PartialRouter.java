@@ -362,7 +362,30 @@ public class PartialRouter extends RWRoute {
     }
 
     @Override
+    protected void preserveNetEarlyForPinSwap(Net net) {
+        if (net.hasPIPs()) {
+            preserveNet(net, true);
+            numPreservedWire++;
+            numPreservedRoutableNets++;
+        }
+    }
+
+    @Override
+    protected boolean needsDeferredRoutingTargetForPinSwap(Net net) {
+        return netToPins.get(net) != null;
+    }
+
+    @Override
+    protected void addDeferredNetConnectionToRoutingTargets(Net net) {
+        addNetConnectionToRoutingTargetsBody(net, false);
+    }
+
+    @Override
     protected void addNetConnectionToRoutingTargets(Net net) {
+        addNetConnectionToRoutingTargetsBody(net, true);
+    }
+
+    private void addNetConnectionToRoutingTargetsBody(Net net, boolean doPreserve) {
         List<SitePinInst> pinsToRoute = netToPins.get(net);
         if (pinsToRoute != null) {
             assert(!pinsToRoute.isEmpty());
@@ -417,7 +440,7 @@ public class PartialRouter extends RWRoute {
             }
         }
 
-        if (net.hasPIPs()) {
+        if (doPreserve && net.hasPIPs()) {
             preserveNet(net, true);
             numPreservedWire++;
             numPreservedRoutableNets++;

@@ -32,11 +32,12 @@ SUMMARY = M / f"{ENGINE}all13-summary"
 RRG_CACHE = M / "all13-rrg-cache"
 
 
-def configure_engine(engine):
-    global ENGINE, SRC, SUMMARY
+def configure_engine(engine, pin_swap=False):
+    global ENGINE, SRC, SUMMARY, RRG_CACHE
     ENGINE = engine
     SRC = M / f"theia50per-ppt-hybrid-{ENGINE}"
     SUMMARY = M / f"{ENGINE}all13-summary"
+    RRG_CACHE = M / ("all13-rrg-cache-pinswap" if pin_swap else "all13-rrg-cache")
     if not SRC.is_dir():
         raise RuntimeError(f"missing engine build dir: {SRC}")
 
@@ -86,6 +87,15 @@ def make_worker(text):
         text,
         'if ("V100" in name and int(free_mib) >= minimum_mib and int(utilization) <= 5',
         'if ("V100" in name and (ALLOW_GPUS is None or int(index) in ALLOW_GPUS) and int(free_mib) >= minimum_mib and int(utilization) <= 5')
+    text = once(
+        text,
+        '    out = out.replace(\'args.insert(4, f"-XX:ActiveProcessorCount={max(2, min(16, len(os.sched_getaffinity(0))))}")\', \'pass\')\n',
+        '    out = out.replace(\'args.insert(4, f"-XX:ActiveProcessorCount={max(2, min(16, len(os.sched_getaffinity(0))))}")\', \'pass\')\n')
+    text = once(
+        text,
+        '    out = out.replace(\'app, native_log = launch("native_multichannel"\', \'args.extend(["--sortOrder", "HPWL_FIRST"]); app, native_log = launch("native_multichannel"\')\n',
+        '    extra_cli = ["--sortOrder", "HPWL_FIRST"] + (["--lutPinSwapping"] if case.get("pin_swap") else [])\n'
+        '    out = out.replace(\'app, native_log = launch("native_multichannel"\', f\'args.extend({extra_cli!r}); app, native_log = launch("native_multichannel"\')\n')
     text = once(
         text,
         '    feature = read(features_dir / "result.json")\n'
@@ -166,7 +176,7 @@ def unpin_f2_geometry(work):
         patch_java(work, edits)
 
 
-def clone(case, force, gpus=None):
+def clone(case, force, gpus=None, pin_swap=False):
     work = M / f"{ENGINE}all13-{case}"
     if work.exists():
         if not force:
@@ -184,7 +194,7 @@ def clone(case, force, gpus=None):
     dcp = CASES / case / f"{case}_partial_routed.dcp"
     if not dcp.is_file():
         raise RuntimeError(f"missing input {dcp}")
-    (work / "case.json").write_text(json.dumps(dict(name=case, dcp=str(dcp), engine=ENGINE, gpus=gpus), indent=1) + "\n")
+    (work / "case.json").write_text(json.dumps(dict(name=case, dcp=str(dcp), engine=ENGINE, gpus=gpus, pin_swap=pin_swap), indent=1) + "\n")
     (work / "worker.py").write_text(make_worker((SRC / "worker.py").read_text()))
     unpin_f2_geometry(work)
     py_compile = subprocess.run([sys.executable, "-m", "py_compile", str(work / "worker.py")],
@@ -208,7 +218,7 @@ def _link_or_copy(src_file, dst_file):
         shutil.copy2(src_file, dst_file)
 
 
-def export_rrg(work, dcp, case, use_cache=True):
+def export_rrg(work, dcp, case, use_cache=True, pin_swap=False):
     """Dump or reuse this design's static RRG artifact (rrg.bin + rrg.manifest.txt + rrg.idmap.bin)."""
     cache_dir = RRG_CACHE / case
     cache_files = ("rrg.bin", "rrg.manifest.txt", "rrg.idmap.bin")
@@ -226,7 +236,7 @@ def export_rrg(work, dcp, case, use_cache=True):
             "com.xilinx.rapidwright.MainEntrypoint", "PartialRouter", str(dcp), str(work / "rrg_export_unused.dcp"),
             "--nonTimingDriven", "--fidesLaneMirror", "--fidesLaneRrg", str(work / "rrg.bin"),
             "--fidesLaneManifest", str(work / "rrg.manifest.txt"), "--sortOrder", "HPWL_FIRST",
-            "--fidesRrgDump", str(work / "rrg")]
+            "--fidesRrgDump", str(work / "rrg")] + (["--lutPinSwapping"] if pin_swap else [])
     (work / "rrg_export.command.json").write_text(json.dumps(argv, indent=1))
     with (work / "rrg_export.log").open("wb") as stream:
         rc = subprocess.run(argv, cwd=work, stdout=stream, stderr=subprocess.STDOUT).returncode
@@ -344,12 +354,12 @@ def collect(case, work, dcp_in, rc, wall, timed_out):
     return row
 
 
-def prepare_case(case, force, use_cache=True, gpus=None):
+def prepare_case(case, force, use_cache=True, gpus=None, pin_swap=False):
     """Clone the configured engine build, patch the harness, and dump or reuse the design's RRG."""
     SUMMARY.mkdir(exist_ok=True)
-    work, dcp_in = clone(case, force, gpus=gpus)
-    info = export_rrg(work, dcp_in, case, use_cache=use_cache)
-    (work / "prepared.json").write_text(json.dumps(dict(engine=ENGINE, case=case, prepared_at=now(), **info), indent=1) + "\n")
+    work, dcp_in = clone(case, force, gpus=gpus, pin_swap=pin_swap)
+    info = export_rrg(work, dcp_in, case, use_cache=use_cache, pin_swap=pin_swap)
+    (work / "prepared.json").write_text(json.dumps(dict(engine=ENGINE, case=case, pin_swap=pin_swap, prepared_at=now(), **info), indent=1) + "\n")
     with (SUMMARY / "prepare.jsonl").open("a") as stream:
         stream.write(json.dumps(dict(engine=ENGINE, case=case, prepared_at=now(), **info)) + "\n")
     print(now(), ENGINE, case, "PREPARED", json.dumps(info), flush=True)
@@ -408,14 +418,16 @@ if __name__ == "__main__":
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--timeout", type=float, default=5400)
     parser.add_argument("--gpus", default=None)
+    parser.add_argument("--pin-swap", action="store_true")
     parser.add_argument("cases", nargs="+")
     args = parser.parse_args()
     allow_gpus = [int(x.strip()) for x in args.gpus.split(",") if x.strip()] if args.gpus else None
-    configure_engine(args.engine)
+    pin_swap = args.pin_swap or (args.engine == "v96")
+    configure_engine(args.engine, pin_swap=pin_swap)
     for name in args.cases:
         try:
             if args.phase in ("prepare", "both"):
-                prepare_case(name, args.force, use_cache=not args.no_rrg_cache, gpus=allow_gpus)
+                prepare_case(name, args.force, use_cache=not args.no_rrg_cache, gpus=allow_gpus, pin_swap=pin_swap)
             if args.phase in ("run", "both"):
                 run_case(name, args.timeout, args.keep_rrg)
         except Exception as exc:  # keep going with the remaining cases

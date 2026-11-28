@@ -58,6 +58,8 @@ final class FidesNativeCpu {
             int[] doubleHpwl,
             byte[] flags);
 
+    static native void nativeRegisterAltSinks(int[] altOffsets, int[] altIds);
+
     static native int[] nativeExportPortals(int[] slrMin, int[] slrMax);
 
     static native void nativeInitCorridorGrid(

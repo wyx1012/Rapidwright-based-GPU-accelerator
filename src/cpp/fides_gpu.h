@@ -37,7 +37,8 @@ enum FidesGpuQueryFlags : uint32_t {
     FG_QF_CROSS     = 1u << 2,
     FG_QF_NORTH     = 1u << 3,
     FG_QF_SOUTH     = 1u << 4,
-    FG_QF_SINK_CTRL = 1u << 5
+    FG_QF_SINK_CTRL = 1u << 5,
+    FG_QF_HAS_ALTS  = 1u << 6
 };
 
 enum FidesGpuStatus : int32_t {
@@ -68,7 +69,10 @@ struct alignas(16) FidesGpuQuery {
     uint32_t oldLen;          // number of interior nodes in oldPath (0 if pre-ripped or unrouted)
     uint32_t outPathOffset;   // offset into outPaths buffer
     uint32_t outPathCap;      // max path length allowed in outPaths
+    uint32_t altCount;        // 0..5 extra alternate sinks (total targets <= 6 with `sink`)
+    uint32_t altSinks[5];     // alternate sink RRG node IDs
 };
+static_assert(sizeof(FidesGpuQuery) % 16 == 0, "FidesGpuQuery must remain 16-byte aligned");
 
 struct FidesGpuWaveParams {
     float    shareWeight;

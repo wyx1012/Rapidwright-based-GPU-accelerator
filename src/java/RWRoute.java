@@ -451,6 +451,21 @@ public class RWRoute {
         for (Connection connection : indirectConnections) {
             connection.getAltSinkRnodes().removeIf(RouteNode::isUsed);
         }
+        for (Connection connection : indirectConnections) {
+            if (!connection.hasAltSinks()) {
+                RouteNode sinkRnode = connection.getSinkRnode();
+                RouteNodeType sinkType = sinkRnode.getType();
+                if (!sinkType.isAnyExclusiveSink()) {
+                    RouteNodeType exclType = sinkType.isEastLocal() ? RouteNodeType.EXCLUSIVE_SINK_EAST :
+                                             sinkType.isWestLocal() ? RouteNodeType.EXCLUSIVE_SINK_WEST :
+                                             sinkType == RouteNodeType.LOCAL_BOTH ? RouteNodeType.EXCLUSIVE_SINK_BOTH :
+                                             null;
+                    assert(exclType != null);
+                    sinkRnode.setType(exclType);
+                    sinkRnode.incrementUser(connection.getNetWrapper());
+                }
+            }
+        }
 
         // Wait for all outstanding RouteNodeGraph.preserveAsync() calls to complete
         routingGraph.awaitPreserve();
@@ -459,6 +474,18 @@ public class RWRoute {
     protected Set<Net> ensureSinkRoutability() {
         // RWRoute routes designs from scratch -- all sinks must be reachable
         return Collections.emptySet();
+    }
+
+    protected void preserveNetEarlyForPinSwap(Net net) {
+        // Base RWRoute does not preserve routable WIRE nets.
+    }
+
+    protected boolean needsDeferredRoutingTargetForPinSwap(Net net) {
+        return true;
+    }
+
+    protected void addDeferredNetConnectionToRoutingTargets(Net net) {
+        addNetConnectionToRoutingTargets(net);
     }
 
     private void categorizeNets() {
@@ -474,6 +501,7 @@ public class RWRoute {
         clkNets = new ArrayList<>();
         staticNetAndRoutingTargets = new HashMap<>();
 
+        List<Net> deferredWireNets = lutPinSwapping ? new ArrayList<>() : null;
         for (Net net : design.getNets()) {
             if (NetTools.isGlobalClock(net)) {
                 addGlobalClkRoutingTargets(net);
@@ -488,13 +516,26 @@ public class RWRoute {
                     preserveNet(net, true);
                     numNotNeedingRoutingNets++;
                 } else if (RouterHelper.isRoutableNetWithSourceSinks(net)) {
-                    addNetConnectionToRoutingTargets(net);
+                    if (deferredWireNets != null) {
+                        preserveNetEarlyForPinSwap(net);
+                        if (needsDeferredRoutingTargetForPinSwap(net)) {
+                            deferredWireNets.add(net);
+                        }
+                    } else {
+                        addNetConnectionToRoutingTargets(net);
+                    }
                 } else {
                     numNotNeedingRoutingNets++;
                 }
             } else {
                 numUnrecognizedNets++;
                 System.err.println("ERROR: Unknown net " + net);
+            }
+        }
+        if (deferredWireNets != null) {
+            routingGraph.awaitPreserve();
+            for (Net net : deferredWireNets) {
+                addDeferredNetConnectionToRoutingTargets(net);
             }
         }
     }

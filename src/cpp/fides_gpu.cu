@@ -520,6 +520,25 @@ __device__ __forceinline__ bool d_willOveruse(int occVal, int sameUses) {
     return occVal > cap || (occVal == cap && sameUses == 0);
 }
 
+__device__ __forceinline__ int d_goalIndex(const FidesGpuQuery& q, U32 node) {
+    if (node == q.sink) return 0;
+    U32 ac = q.altCount;
+    if (ac == 0u) return -1;
+    #pragma unroll
+    for (U32 i = 0u; i < 5u; ++i) {
+        if (i < ac && node == q.altSinks[i]) return static_cast<int>(i + 1u);
+    }
+    return -1;
+}
+
+__device__ __forceinline__ bool d_isGoalNode(const FidesGpuQuery& q, U32 node) {
+    return d_goalIndex(q, node) >= 0;
+}
+
+__device__ __forceinline__ U32 d_goalNodeAt(const FidesGpuQuery& q, U32 goalIdx) {
+    return (goalIdx == 0u || goalIdx > q.altCount) ? q.sink : q.altSinks[goalIdx - 1u];
+}
+
 __device__ __forceinline__ int d_checkAccessAndLookahead(
         const GpuGraphDevice& G,
         const FidesGpuNodeHot& pg, int enteringTileId,
@@ -532,8 +551,13 @@ __device__ __forceinline__ int d_checkAccessAndLookahead(
     earlyTerm = false;
 
     U32 cf = hotTypeFlags(cg);
-    if (child == q.sink) {
-        earlyTerm = (cf & TF_EXCLUSIVE) ? true : !d_willOveruse(occVal, sameUses);
+    if (d_isGoalNode(q, child)) {
+        if (cf & TF_EXCLUSIVE) {
+            earlyTerm = true;
+        } else {
+            if (sameUses > 0) return 1;
+            earlyTerm = !d_willOveruse(occVal, sameUses);
+        }
         return 0;
     }
 
@@ -555,14 +579,14 @@ __device__ __forceinline__ int d_checkAccessAndLookahead(
             U32 st = static_cast<U32>(q.sinkType);
             if (st == c_ord[EAST] || st == c_ord[EX_EAST]) {
                 if ((cf & TF_WEST) || ct == c_ord[RESERVED]) return 1;
-                if (st != c_ord[EX_EAST]) return -1;
+                if (st != c_ord[EX_EAST] && !(q.flags & FG_QF_HAS_ALTS)) return -1;
                 allowed = (childTile == q.sinkTile || (childX == q.sinkBeginX && fides_absInt(childY - q.sinkBeginY) <= 1));
             } else if (st == c_ord[WEST] || st == c_ord[EX_WEST]) {
                 if ((cf & TF_EAST) || ct == c_ord[RESERVED]) return 1;
-                if (st != c_ord[EX_WEST]) return -1;
+                if (st != c_ord[EX_WEST] && !(q.flags & FG_QF_HAS_ALTS)) return -1;
                 allowed = (childTile == q.sinkTile || (childX == q.sinkBeginX && fides_absInt(childY - q.sinkBeginY) <= 1));
-            } else if (st == c_ord[EX_BOTH]) {
-                if (childTile != q.sinkTile || ct != c_ord[BOTH] || !(q.flags & FG_QF_SINK_CTRL)) return 1;
+            } else if (st == c_ord[EX_BOTH] || (st == c_ord[BOTH] && (q.flags & FG_QF_HAS_ALTS))) {
+                if (childTile != q.sinkTile || ct != c_ord[BOTH] || (!(q.flags & FG_QF_SINK_CTRL) && !(q.flags & FG_QF_HAS_ALTS))) return 1;
                 allowed = true;
             } else if (st == c_ord[EX_NONLOCAL]) {
                 return 1;
@@ -691,9 +715,18 @@ __device__ __forceinline__ bool d_computeCost(
     return true;
 }
 
+constexpr U32 GOAL_PREV_MASK = 0x1FFFFFFFu; // 29 bits (~536M nodes max)
+
 __device__ __forceinline__ U64 packGPrev(float g, U32 prev) {
     U32 gb = (g <= 0.0f) ? 0u : __float_as_uint(g);
     return (static_cast<U64>(gb) << 32) | static_cast<U64>(prev);
+}
+
+__device__ __forceinline__ U64 packGoalGPrev(float g, U32 goalIdx, U32 prev) {
+    U32 gb = (g <= 0.0f) ? 0u : __float_as_uint(g);
+    return (static_cast<U64>(gb) << 32)
+         | ((static_cast<U64>(goalIdx) & 7ULL) << 29)
+         | static_cast<U64>(prev & GOAL_PREV_MASK);
 }
 
 __device__ __forceinline__ U32 hashFindSlot(
@@ -1027,9 +1060,10 @@ kTierAWarpSearch(
             }
 
             if (live) {
-                if (uCand == q.sink) {
+                int popGoal = d_goalIndex(q, uCand);
+                if (popGoal >= 0) {
                     atomicMin(reinterpret_cast<unsigned long long*>(&S.bestSinkGP),
-                              static_cast<unsigned long long>(packGPrev(myG, myPrev)));
+                              static_cast<unsigned long long>(packGoalGPrev(myG, static_cast<U32>(popGoal), myPrev)));
                     atomicExch(&S.foundSink, 1u);
                 } else {
                     U32 rank = static_cast<U32>(__popc(liveMask & ((1u << lane) - 1u)));
@@ -1078,7 +1112,7 @@ kTierAWarpSearch(
                 FidesGpuNodeHot cg = loadHot(G.hot, child);
                 int childX = hotEndX(cg);
                 int childY = d_endY(cg, pg);
-                if (useBox && child != q.sink) {
+                if (useBox && !d_isGoalNode(q, child)) {
                     if (!(childX > q.xmin && childX < q.xmax && childY > q.ymin && childY < q.ymax)) return;
                 }
                 // Fast 1-probe closed check (catches ~85% of closed hits in 1 load without full double probing)
@@ -1110,8 +1144,9 @@ kTierAWarpSearch(
                 }
 
                 if (earlyTerm) {
+                    int gi = d_goalIndex(q, child);
                     atomicMin(reinterpret_cast<unsigned long long*>(&S.bestSinkGP),
-                              static_cast<unsigned long long>(packGPrev(newPartial, u)));
+                              static_cast<unsigned long long>(packGoalGPrev(newPartial, static_cast<U32>(gi >= 0 ? gi : 0), u)));
                     atomicExch(&S.foundSink, 1u);
                     return;
                 }
@@ -1200,8 +1235,10 @@ kTierAWarpSearch(
             if (S.foundSink != 0u) {
                 // First measure exact path length, then reserve exact slice in outPaths via atomicAdd!
                 U32 len = 1u;
-                U32 cur = static_cast<U32>(S.bestSinkGP & 0xFFFFFFFFu);
-                bool ok = (cur != UINT32_MAX || q.sink == q.src);
+                U32 goalIdx = static_cast<U32>((S.bestSinkGP >> 29) & 7ULL);
+                U32 goalNode = d_goalNodeAt(q, goalIdx);
+                U32 cur = static_cast<U32>(S.bestSinkGP & GOAL_PREV_MASK);
+                bool ok = (cur < G.n);
                 U32 maxAllowed = (q.outPathCap > 0u) ? q.outPathCap : 4096u;
                 while (ok && cur != UINT32_MAX) {
                     ++len;
@@ -1211,13 +1248,13 @@ kTierAWarpSearch(
                     if (sl == UINT32_MAX) { ok = false; break; }
                     cur = static_cast<U32>(M.gPrev[sl] & 0xFFFFFFFFu);
                 }
-                if (ok && (cur == q.src || q.sink == q.src)) {
+                if (ok && cur == q.src) {
                     U32 pOff = atomicAdd(outPathCursor, len);
                     if (pOff + len <= outPathsCap) {
                         U32* dst = outPaths + pOff;
                         U32 w = 0u;
-                        dst[w++] = q.sink;
-                        U32 c2 = static_cast<U32>(S.bestSinkGP & 0xFFFFFFFFu);
+                        dst[w++] = goalNode;
+                        U32 c2 = static_cast<U32>(S.bestSinkGP & GOAL_PREV_MASK);
                         while (c2 != UINT32_MAX && w < len) {
                             dst[w++] = c2;
                             if (c2 == q.src) break;
@@ -1540,9 +1577,10 @@ kTierBCtaSearch(
                         U64 gp = M.gPrev[sl];
                         float myG = __uint_as_float(static_cast<U32>(gp >> 32));
                         U32 myPrev = static_cast<U32>(gp & 0xFFFFFFFFu);
-                        if (uCand == q.sink) {
+                        int popGoal = d_goalIndex(q, uCand);
+                        if (popGoal >= 0) {
                             atomicMin(reinterpret_cast<unsigned long long*>(&s_bestSinkGP),
-                                      static_cast<unsigned long long>(packGPrev(myG, myPrev)));
+                                      static_cast<unsigned long long>(packGoalGPrev(myG, static_cast<U32>(popGoal), myPrev)));
                             atomicExch(&s_foundSink, 1u);
                         } else {
                             U32 pos = atomicAdd(&s_popCount, 1u);
@@ -1599,7 +1637,7 @@ kTierBCtaSearch(
                 FidesGpuNodeHot cg = loadHot(G.hot, child);
                 int childX = hotEndX(cg);
                 int childY = d_endY(cg, pg);
-                if (useBox && child != q.sink) {
+                if (useBox && !d_isGoalNode(q, child)) {
                     if (!(childX > q.xmin && childX < q.xmax && childY > q.ymin && childY < q.ymax)) return;
                 }
                 U32 h0 = d_mixId(child) & cfg.hashMask;
@@ -1630,8 +1668,9 @@ kTierBCtaSearch(
                 }
 
                 if (earlyTerm) {
+                    int gi = d_goalIndex(q, child);
                     atomicMin(reinterpret_cast<unsigned long long*>(&s_bestSinkGP),
-                              static_cast<unsigned long long>(packGPrev(newPartial, u)));
+                              static_cast<unsigned long long>(packGoalGPrev(newPartial, static_cast<U32>(gi >= 0 ? gi : 0), u)));
                     atomicExch(&s_foundSink, 1u);
                     return;
                 }
@@ -1724,8 +1763,10 @@ kTierBCtaSearch(
             res.pathOffset = 0u;
             if (s_foundSink != 0u) {
                 U32 len = 1u;
-                U32 cur = static_cast<U32>(s_bestSinkGP & 0xFFFFFFFFu);
-                bool ok = (cur != UINT32_MAX || q.sink == q.src);
+                U32 goalIdx = static_cast<U32>((s_bestSinkGP >> 29) & 7ULL);
+                U32 goalNode = d_goalNodeAt(q, goalIdx);
+                U32 cur = static_cast<U32>(s_bestSinkGP & GOAL_PREV_MASK);
+                bool ok = (cur < G.n);
                 U32 maxAllowed = (q.outPathCap > 0u) ? q.outPathCap : 8192u;
                 while (ok && cur != UINT32_MAX) {
                     ++len;
@@ -1735,13 +1776,13 @@ kTierBCtaSearch(
                     if (sl == UINT32_MAX) { ok = false; break; }
                     cur = static_cast<U32>(M.gPrev[sl] & 0xFFFFFFFFu);
                 }
-                if (ok && (cur == q.src || q.sink == q.src)) {
+                if (ok && cur == q.src) {
                     U32 pOff = atomicAdd(outPathCursor, len);
                     if (pOff + len <= outPathsCap) {
                         U32* dst = outPaths + pOff;
                         U32 w = 0u;
-                        dst[w++] = q.sink;
-                        U32 c2 = static_cast<U32>(s_bestSinkGP & 0xFFFFFFFFu);
+                        dst[w++] = goalNode;
+                        U32 c2 = static_cast<U32>(s_bestSinkGP & GOAL_PREV_MASK);
                         while (c2 != UINT32_MAX && w < len) {
                             dst[w++] = c2;
                             if (c2 == q.src) break;
@@ -1946,10 +1987,13 @@ kTierBMegaCoopSearch(
                 U32 u = srcBuf[i];
                 U32 prevSt = atomicCAS(M.state + u, 1u, 2u);
                 if (prevSt == 1u) {
-                    if (u == q.sink) {
+                    int popGoal = d_goalIndex(q, u);
+                    if (popGoal >= 0) {
                         U64 gp = M.gPrev[u];
+                        float myG = __uint_as_float(static_cast<U32>(gp >> 32));
+                        U32 myPrev = static_cast<U32>(gp & 0xFFFFFFFFu);
                         atomicMin(reinterpret_cast<unsigned long long*>(&C->bestSinkGP),
-                                  static_cast<unsigned long long>(gp));
+                                  static_cast<unsigned long long>(packGoalGPrev(myG, static_cast<U32>(popGoal), myPrev)));
                         atomicExch(&C->foundSink, 1u);
                     } else {
                         U32 pos = atomicAdd(&C->activeCnt, 1u);
@@ -2017,7 +2061,7 @@ kTierBMegaCoopSearch(
                     FidesGpuNodeHot cg = loadHot(G.hot, child);
                     int childX = hotEndX(cg);
                     int childY = d_endY(cg, pg);
-                    if (useBox && child != q.sink) {
+                    if (useBox && !d_isGoalNode(q, child)) {
                         if (!(childX > q.xmin && childX < q.xmax && childY > q.ymin && childY < q.ymax)) continue;
                     }
                     FidesGpuDynNode dy = loadDyn(G.dyn, child);
@@ -2043,8 +2087,9 @@ kTierBMegaCoopSearch(
                         break;
                     }
                     if (earlyTerm) {
+                        int gi = d_goalIndex(q, child);
                         atomicMin(reinterpret_cast<unsigned long long*>(&C->bestSinkGP),
-                                  static_cast<unsigned long long>(packGPrev(newPartial, u)));
+                                  static_cast<unsigned long long>(packGoalGPrev(newPartial, static_cast<U32>(gi >= 0 ? gi : 0), u)));
                         atomicExch(&C->foundSink, 1u);
                         break;
                     }
@@ -2108,9 +2153,11 @@ kTierBMegaCoopSearch(
             if (C->foundSink != 0u) {
                 U32 len = 0u, cap = q.outPathCap;
                 U32* dst = outPaths + q.outPathOffset;
-                if (cap > 0u) dst[len++] = q.sink;
-                U32 cur = static_cast<U32>(C->bestSinkGP & 0xFFFFFFFFu);
-                bool ok = (cur != UINT32_MAX || q.sink == q.src);
+                U32 goalIdx = static_cast<U32>((C->bestSinkGP >> 29) & 7ULL);
+                U32 goalNode = d_goalNodeAt(q, goalIdx);
+                if (cap > 0u) dst[len++] = goalNode;
+                U32 cur = static_cast<U32>(C->bestSinkGP & GOAL_PREV_MASK);
+                bool ok = (cur < G.n);
                 while (ok && cur != UINT32_MAX) {
                     if (len >= cap) { ok = false; break; }
                     dst[len++] = cur;

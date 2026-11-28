@@ -317,7 +317,9 @@ struct ConnData {
     I32 netSize;
     float xCenter;
     float yCenter;
-    uint8_t flags;  // 0:shapeOk, 1:useOrigBox, 2:uturn, 3:cross, 4:north, 5:south, 6:sinkCtrl
+    U32 altStart = 0u;
+    uint8_t altCount = 0u;
+    uint8_t flags;  // 0:shapeOk, 1:useOrigBox, 2:uturn, 3:cross, 4:north, 5:south, 6:sinkCtrl, 7:hasAltSinks
 };
 
 struct GraphData {
@@ -350,6 +352,7 @@ struct GraphData {
 
     std::vector<NetScopeData> netScopes;
     std::vector<ConnData> conns;
+    std::vector<U32> altSinkPool;
     std::vector<std::vector<U32>> connPaths;
     std::vector<uint8_t> connRouted;
     std::vector<I64> lastPops;
@@ -701,6 +704,9 @@ inline bool willOveruseCached(U32 id, int& outOcc, int& outSame, bool& hasUsage)
 
 struct SearchQuery {
     U32 source, sink;
+    U32 altSinks[5];
+    uint8_t altCount;
+    bool isExcl;
     int xmin, ymin, xmax, ymax;
     int origXmin, origXmax;
     bool useBox, uturn, cross, north, south;
@@ -714,10 +720,41 @@ struct SearchQuery {
     I64 nodesPopped;
 };
 
+inline bool connIsExclusive(U32 cIdx) {
+    return (G.conns[cIdx].flags & 0x80u) == 0u;
+}
+
+inline void connUserRange(U32 cIdx, size_t len, size_t& outLo, size_t& outHi) {
+    if (connIsExclusive(cIdx)) {
+        outLo = (len > 2u) ? 1u : len;
+        outHi = (len > 2u) ? (len - 1u) : len;
+    } else {
+        outLo = 0u;
+        outHi = len;
+    }
+}
+
+inline bool isConnGoal(U32 cIdx, U32 node) {
+    const ConnData& cd = G.conns[cIdx];
+    if (node == cd.sink) return true;
+    for (uint8_t i = 0u; i < cd.altCount; ++i) {
+        if (G.altSinkPool[cd.altStart + i] == node) return true;
+    }
+    return false;
+}
+
+inline bool isQueryGoal(const SearchQuery& q, U32 node) {
+    if (node == q.sink) return true;
+    for (uint8_t i = 0u; i < q.altCount; ++i) {
+        if (q.altSinks[i] == node) return true;
+    }
+    return false;
+}
+
 inline bool isAccessibleSinkCached(
         U32 child, const NodeGeomHot& cg, const SearchQuery& q,
         int& outOcc, int& outSame, bool& hasUsage) {
-    if (child == q.sink) return true;
+    if (isQueryGoal(q, child)) return true;
     if (!(cg.preFlags & PF_PINBOUNCE)) return false;
     outOcc = getUsage(child, outSame);
     hasUsage = true;
@@ -731,10 +768,15 @@ inline int checkAccessAndLookahead(
         SearchQuery& q, bool& lookahead,
         int& outOcc, int& outSame, bool& hasUsage) {
     lookahead = false;
-    if (child == q.sink) {
+    if (isQueryGoal(q, child)) {
         if (cg.typeFlags & Exclusive) {
             q.earlyTermination = true;
         } else {
+            if (!hasUsage) {
+                outOcc = getUsage(child, outSame);
+                hasUsage = true;
+            }
+            if (outSame > 0) return 1;
             q.earlyTermination = !willOveruseCached(child, outOcc, outSame, hasUsage);
         }
         return 0;
@@ -757,11 +799,15 @@ inline int checkAccessAndLookahead(
             bool allowed = false;
             switch (q.sinkDirKind) {
                 case 0: // EX_EAST
+                case 4: // EAST (altSinks)
                     if ((cf & West) || ct == s_ord[RESERVED]) return 1;
+                    if (q.sinkDirKind == 4 && q.isExcl) return -1;
                     allowed = (childTile == q.sinkTile || (childX == q.sinkBeginX && fides_absInt(childY - q.sinkBeginY) <= 1));
                     break;
                 case 1: // EX_WEST
+                case 5: // WEST (altSinks)
                     if ((cf & East) || ct == s_ord[RESERVED]) return 1;
+                    if (q.sinkDirKind == 5 && q.isExcl) return -1;
                     allowed = (childTile == q.sinkTile || (childX == q.sinkBeginX && fides_absInt(childY - q.sinkBeginY) <= 1));
                     break;
                 case 2: // EX_BOTH
@@ -770,12 +816,11 @@ inline int checkAccessAndLookahead(
                     break;
                 case 3: // EX_NONLOCAL
                     return 1;
-                case 4: // EAST
-                    if ((cf & West) || ct == s_ord[RESERVED]) return 1;
-                    return -1;
-                case 5: // WEST
-                    if ((cf & East) || ct == s_ord[RESERVED]) return 1;
-                    return -1;
+                case 6: // BOTH / OTHER
+                    if (q.isExcl) return -1;
+                    if (childTile != q.sinkTile || ct != s_ord[BOTH]) return 1;
+                    allowed = true;
+                    break;
                 default:
                     return -1;
             }
@@ -852,7 +897,7 @@ int expandNode(U32 u, float uUpstream, U32 entering, SearchQuery& q, int depth) 
         const NodeGeomHot& cg = G.geomHot[child];
         int childX = static_cast<int>(cg.endTileX);
         int childY = endY(cg, &pg);
-        if (q.useBox && child != q.sink) {
+        if (q.useBox && !isQueryGoal(q, child)) {
             if (!(childX > q.xmin && childX < q.xmax && childY > q.ymin && childY < q.ymax)) {
                 continue;
             }
@@ -985,23 +1030,24 @@ I32 runProbe(
     if (!(c.flags & 1u) || c.doubleHpwl <= 0) return STATUS_FALLBACK;
     if (c.netId >= G.netScopes.size() || !G.netScopes[c.netId].ready) return STATUS_FALLBACK;
 
+    const bool isExcl = connIsExclusive(connIdx);
     const NetScopeData& sc = G.netScopes[c.netId];
     const auto& oldPath = G.connPaths[connIdx];
     size_t oldLen = G.connRouted[connIdx] ? oldPath.size() : 0;
+    size_t oldLo = 0u, oldHi = 0u;
+    if (oldLen > 0u) connUserRange(connIdx, oldLen, oldLo, oldHi);
     bool useZeroCopyScope = sc.isFlat;
-    size_t oldOvItems = (oldLen > 2) ? (oldLen - 2) : 0;
+    size_t oldOvItems = (oldHi > oldLo) ? (oldHi - oldLo) : 0u;
     if (useZeroCopyScope) {
         S.beginOverrides(oldOvItems, &sc);
-        if (oldLen > 2) {
-            for (size_t i = 1; i + 1 < oldLen; ++i) {
-                U32 oid = oldPath[i];
-                bool ins = false;
-                OverrideSlot* sl = S.findOrInsertOv(oid, &ins);
-                if (ins) {
-                    sl->same = sc.findFlatConcurrent(oid);
-                }
-                if (sl->same > 0 && --sl->same == 0) --sl->occDelta;
+        for (size_t i = oldLo; i < oldHi; ++i) {
+            U32 oid = oldPath[i];
+            bool ins = false;
+            OverrideSlot* sl = S.findOrInsertOv(oid, &ins);
+            if (ins) {
+                sl->same = sc.findFlatConcurrent(oid);
             }
+            if (sl->same > 0 && --sl->same == 0) --sl->occDelta;
         }
     } else if (!sc.isFlat) {
         S.beginOverrides(sc.smallIds.size() + oldOvItems, nullptr);
@@ -1009,11 +1055,9 @@ I32 runProbe(
             OverrideSlot* sl = S.findOrInsertOv(sc.smallIds[i]);
             sl->same = sc.smallCounts[i];
         }
-        if (oldLen > 2) {
-            for (size_t i = 1; i + 1 < oldLen; ++i) {
-                OverrideSlot* sl = S.findOrInsertOv(oldPath[i]);
-                if (sl->same > 0 && --sl->same == 0) --sl->occDelta;
-            }
+        for (size_t i = oldLo; i < oldHi; ++i) {
+            OverrideSlot* sl = S.findOrInsertOv(oldPath[i]);
+            if (sl->same > 0 && --sl->same == 0) --sl->occDelta;
         }
     } else {
         S.beginOverrides(static_cast<size_t>(sc.liveCount) + oldLen + 16, nullptr);
@@ -1026,17 +1070,20 @@ I32 runProbe(
                 sl->same = cnt;
             }
         }
-        if (oldLen > 2) {
-            for (size_t i = 1; i + 1 < oldLen; ++i) {
-                OverrideSlot* sl = S.findOrInsertOv(oldPath[i]);
-                if (sl->same > 0 && --sl->same == 0) --sl->occDelta;
-            }
+        for (size_t i = oldLo; i < oldHi; ++i) {
+            OverrideSlot* sl = S.findOrInsertOv(oldPath[i]);
+            if (sl->same > 0 && --sl->same == 0) --sl->occDelta;
         }
     }
 
     SearchQuery q{};
     q.source = c.src;
     q.sink = c.sink;
+    q.altCount = c.altCount;
+    q.isExcl = isExcl;
+    for (uint8_t ai = 0u; ai < c.altCount && ai < 5u; ++ai) {
+        q.altSinks[ai] = G.altSinkPool[c.altStart + ai];
+    }
     bool useOrigBox = (c.flags & 2u) != 0;
     if (useBox && useOrigBox) {
         q.xmin = std::max(xmin, c.origXmin);
@@ -1113,7 +1160,7 @@ I32 runProbe(
     while (!S.heap.empty()) {
         U32 u = S.popHeap();
         ++q.nodesPopped;
-        if (u == q.sink) {
+        if (isQueryGoal(q, u)) {
             target = u;
             break;
         }
@@ -2496,7 +2543,50 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         c.yCenter = nyc[i];
         c.netSize = nsize[i];
         c.doubleHpwl = dhpwl[i];
+        c.altStart = 0u;
+        c.altCount = 0u;
         c.flags = static_cast<uint8_t>(flg[i]);
+    }
+    G.altSinkPool.clear();
+}
+
+JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_nativeRegisterAltSinks(
+        JNIEnv* env, jclass, jintArray jAltOffsets, jintArray jAltIds) {
+    if (jAltOffsets == nullptr) return;
+    jsize offLen = env->GetArrayLength(jAltOffsets);
+    size_t n = G.conns.size();
+    if (static_cast<size_t>(offLen) < n + 1u) return;
+    std::vector<jint> offs(static_cast<size_t>(offLen));
+    env->GetIntArrayRegion(jAltOffsets, 0, offLen, offs.data());
+    jsize totAlts = (jAltIds != nullptr) ? env->GetArrayLength(jAltIds) : 0;
+    G.altSinkPool.resize(static_cast<size_t>(totAlts));
+    if (totAlts > 0) {
+        std::vector<jint> tmp(static_cast<size_t>(totAlts));
+        env->GetIntArrayRegion(jAltIds, 0, totAlts, tmp.data());
+        for (jsize k = 0; k < totAlts; ++k) G.altSinkPool[static_cast<size_t>(k)] = static_cast<U32>(tmp[k]);
+    }
+    size_t altConns = 0u;
+    int maxDx = 0, maxDy = 0;
+    for (size_t i = 0u; i < n; ++i) {
+        U32 s0 = static_cast<U32>(offs[i]);
+        U32 s1 = static_cast<U32>(offs[i + 1u]);
+        if (s1 > s0 && s1 <= G.altSinkPool.size()) {
+            U32 cnt = std::min<U32>(5u, s1 - s0);
+            G.conns[i].altStart = s0;
+            G.conns[i].altCount = static_cast<uint8_t>(cnt);
+            ++altConns;
+            const NodeGeomHot& base = G.geomHot[G.conns[i].sink];
+            for (U32 k = 0u; k < cnt; ++k) {
+                const NodeGeomHot& ag = G.geomHot[G.altSinkPool[s0 + k]];
+                maxDx = std::max(maxDx, fides_absInt(static_cast<int>(ag.endTileX) - static_cast<int>(base.endTileX)));
+                maxDy = std::max(maxDy, fides_absInt(static_cast<int>(ag.endTileYRaw) - static_cast<int>(base.endTileYRaw)));
+            }
+        }
+    }
+    if (altConns > 0u) {
+        fprintf(stdout, "FIDES_V96_ALTSINKS conns=%zu alt_conns=%zu total_alts=%zu max_dx=%d max_dy=%d\n",
+                n, altConns, G.altSinkPool.size(), maxDx, maxDy);
+        fflush(stdout);
     }
 }
 
@@ -2988,7 +3078,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         return InFlightBox{cd.origXmin, cd.origYmin, cd.origXmax, cd.origYmax};
     };
 
-    auto commitStampedPath = [&](U32 netId, const std::vector<U32>& newPath) {
+    auto commitStampedPath = [&](U32 cIdx, U32 netId, const std::vector<U32>& newPath) {
         if (G.commitSeq >= 4000000000u) {
             std::memset(G.lastCommitSeq.data(), 0, G.lastCommitSeq.size() * sizeof(U32));
             std::memset(G.prevOtherSeq.data(), 0, G.prevOtherSeq.size() * sizeof(U32));
@@ -2997,9 +3087,11 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         }
         U32 cSeq = ++G.commitSeq;
         const U32 stampEp = G.gpuStampWaveEpoch;
-        const U64 wKey = (stampEp != 0u) ? ((static_cast<U64>(stampEp) << 32) | static_cast<U64>(netId)) : 0ULL;
-        size_t newLen = newPath.size();
-        for (size_t i = 1; i + 1 < newLen; ++i) {
+        const U64 wKeyBase = (stampEp != 0u) ? ((static_cast<U64>(stampEp) << 32) | static_cast<U64>(netId)) : 0ULL;
+        const bool isExcl = connIsExclusive(cIdx);
+        size_t uLo = 0u, uHi = 0u;
+        connUserRange(cIdx, newPath.size(), uLo, uHi);
+        for (size_t i = uLo; i < uHi; ++i) {
             U32 nid = newPath[i];
             if (G.lastCommitNet[nid] != netId) {
                 if (G.lastCommitSeq[nid] > G.prevOtherSeq[nid]) {
@@ -3009,7 +3101,8 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
             }
             G.lastCommitSeq[nid] = cSeq;
             if (stampEp != 0u) {
-                __atomic_store_n(&G.waveCommitKey[nid], wKey, __ATOMIC_RELAXED);
+                U64 wk = wKeyBase | ((!isExcl && i == 0u) ? (1ULL << 63) : 0ULL);
+                __atomic_store_n(&G.waveCommitKey[nid], wk, __ATOMIC_RELAXED);
             }
         }
     };
@@ -3101,9 +3194,12 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                     U32 netId = G.conns[connIdx].netId;
                     NetScopeData& sc = G.netScopes[netId];
                     ensureScopeCapacitySingleThread(sc, singlePath.size());
-                    for (size_t i = 1; i + 1 < oldLen; ++i) addToScope(sc, oldPath[i], -1);
-                    for (size_t i = 1; i + 1 < singlePath.size(); ++i) addToScope(sc, singlePath[i], +1);
-                    commitStampedPath(netId, singlePath);
+                    size_t oLo = 0u, oHi = 0u, nLo = 0u, nHi = 0u;
+                    if (oldLen > 0u) connUserRange(connIdx, oldLen, oLo, oHi);
+                    connUserRange(connIdx, singlePath.size(), nLo, nHi);
+                    for (size_t i = oLo; i < oHi; ++i) addToScope(sc, oldPath[i], -1);
+                    for (size_t i = nLo; i < nHi; ++i) addToScope(sc, singlePath[i], +1);
+                    commitStampedPath(connIdx, netId, singlePath);
                     G.connPaths[connIdx].swap(singlePath);
                     G.connRouted[connIdx] = 1;
                     ++routedCount;
@@ -3429,12 +3525,20 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 size_t newLen = newPath.size();
 
                 // Cross-net vs same-net conflict check:
-                // Only reject if another net != netId committed an occupied (>=cap) node after dispatchSeq.
+                // Reject if another net != netId committed an occupied (>=cap) node after dispatchSeq,
+                // OR if a non-exclusive LUT sink pin (i == 0) was claimed by any conn after dispatchSeq.
+                const bool isExcl = connIsExclusive(connIdx);
+                size_t nLo = 0u, nHi = 0u;
+                connUserRange(connIdx, newLen, nLo, nHi);
                 bool conflict = false;
                 bool sawSameNetUpdate = false;
                 if (sl.dispatchSeq < G.commitSeq) {
-                    for (size_t i = 1; i + 1 < newLen; ++i) {
+                    for (size_t i = nLo; i < nHi; ++i) {
                         U32 nid = newPath[i];
+                        if (!isExcl && i == 0u && G.lastCommitSeq[nid] > sl.dispatchSeq) {
+                            conflict = true;
+                            break;
+                        }
                         if (G.lastCommitSeq[nid] > sl.dispatchSeq && G.occ[nid] >= cap) {
                             if (G.lastCommitNet[nid] != netId || G.prevOtherSeq[nid] > sl.dispatchSeq) {
                                 conflict = true;
@@ -3456,11 +3560,13 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 if (sawSameNetUpdate) ++sameNetOk;
                 if (netConflicts[netId] > 0) --netConflicts[netId];
 
-                commitStampedPath(netId, newPath);
+                commitStampedPath(connIdx, netId, newPath);
 
                 NetScopeData& sc = G.netScopes[netId];
-                for (size_t i = 1; i + 1 < oldLen; ++i) addToScope(sc, oldPath[i], -1);
-                for (size_t i = 1; i + 1 < newLen; ++i) addToScope(sc, newPath[i], +1);
+                size_t oLo = 0u, oHi = 0u;
+                if (oldLen > 0u) connUserRange(connIdx, oldLen, oLo, oHi);
+                for (size_t i = oLo; i < oHi; ++i) addToScope(sc, oldPath[i], -1);
+                for (size_t i = nLo; i < nHi; ++i) addToScope(sc, newPath[i], +1);
 
                 G.connPaths[connIdx].swap(sl.outPath);
                 G.connRouted[connIdx] = 1;
@@ -3726,6 +3832,11 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         if (c.flags & 16u) q.flags |= FG_QF_NORTH;
         if (c.flags & 32u) q.flags |= FG_QF_SOUTH;
         if (c.flags & 64u) q.flags |= FG_QF_SINK_CTRL;
+        if (c.flags & 128u) q.flags |= FG_QF_HAS_ALTS;
+        q.altCount = static_cast<U32>(c.altCount);
+        for (U32 ai = 0u; ai < q.altCount && ai < 5u; ++ai) {
+            q.altSinks[ai] = G.altSinkPool[c.altStart + ai];
+        }
         q.sinkBeginX = c.sinkBeginX;
         q.sinkBeginY = c.sinkBeginY;
         q.sinkEndX = static_cast<I32>(G.geomHot[c.sink].endTileX);
@@ -3745,19 +3856,23 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         q.sameBloom64 = sd.bloom64;
         if (oldLen > 0u) {
             const auto& op = G.connPaths[cIdx];
+            size_t oLo = 0u, oHi = 0u;
+            connUserRange(cIdx, op.size(), oLo, oHi);
+            U32 actualOld = (oHi > oLo) ? static_cast<U32>(oHi - oLo) : 0u;
+            U32 copyLen = std::min(oldLen, actualOld);
             U64 ob = 0ULL;
             U32* dst = oldNodesPtr + oldOff;
-            for (U32 i = 0u; i < oldLen; ++i) {
-                U32 nid = op[i + 1u];
+            for (U32 i = 0u; i < copyLen; ++i) {
+                U32 nid = op[oLo + i];
                 dst[i] = nid;
                 ob |= (1ULL << (mixId(nid) & 63u));
             }
-            if (oldLen > 1u) {
-                std::sort(dst, dst + oldLen);
+            if (copyLen > 1u) {
+                std::sort(dst, dst + copyLen);
             }
             q.oldBloom64 = ob;
             q.oldOffset = oldOff;
-            q.oldLen = oldLen;
+            q.oldLen = copyLen;
         }
         q.outPathOffset = pathOffset;
         q.outPathCap = pathCap;
@@ -3767,8 +3882,10 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
         U32 netId = G.conns[cIdx].netId;
         NetScopeData& sc = G.netScopes[netId];
         const auto& oldPath = G.connPaths[cIdx];
-        ensureScopeCapacitySingleThread(sc, oldPath.size());
-        for (size_t i = 1; i + 1 < oldPath.size(); ++i) addToScope(sc, oldPath[i], +1);
+        size_t oLo = 0u, oHi = 0u;
+        connUserRange(cIdx, oldPath.size(), oLo, oHi);
+        ensureScopeCapacitySingleThread(sc, oHi > oLo ? (oHi - oLo) : 0u);
+        for (size_t i = oLo; i < oHi; ++i) addToScope(sc, oldPath[i], +1);
     };
 
     struct GpuPassOut {
@@ -4509,8 +4626,12 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 }
                 int d = netAssignedDev[dIdx];
                 U32 lk = devB[d]++;
-                U32 oldLen = (!pickedRipped[pi] && G.connRouted[cIdx] && G.connPaths[cIdx].size() > 2u)
-                        ? static_cast<U32>(G.connPaths[cIdx].size() - 2u) : 0u;
+                U32 oldLen = 0u;
+                if (!pickedRipped[pi] && G.connRouted[cIdx]) {
+                    size_t oLo = 0u, oHi = 0u;
+                    connUserRange(cIdx, G.connPaths[cIdx].size(), oLo, oHi);
+                    oldLen = (oHi > oLo) ? static_cast<U32>(oHi - oLo) : 0u;
+                }
                 waveActIdx.push_back(aIdx);
                 wasRipped.push_back(pickedRipped[pi]);
                 itemDev.push_back(d);
@@ -4723,7 +4844,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 out.commitEpochEnd = curCommitEpoch;
             } else {
                 if (!launchedCpuOverlap) {
-                    if (++G.waveCommitEpoch == 0u) {
+                    if (++G.waveCommitEpoch == 0u || G.waveCommitEpoch >= 1900000000u) {
                         std::memset(G.waveCommitKey.data(), 0, G.waveCommitKey.size() * sizeof(U64));
                         G.waveCommitEpoch = 1u;
                     }
@@ -4749,29 +4870,41 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                     U32 cIdx = static_cast<U32>(activeConns[aIdx]);
                     const U32 len = static_cast<U32>(res.status);
                     const U32* pPtr = devBufs[d].outPaths + res.pathOffset;
-                    if (pPtr[0] != G.conns[cIdx].sink || pPtr[len - 1u] != G.conns[cIdx].src) {
+                    if (!isConnGoal(cIdx, pPtr[0]) || pPtr[len - 1u] != G.conns[cIdx].src) {
                         itemAct[k] = PA_BAD_FALLBACK;
                         continue;
                     }
 
                     U32 netId = G.conns[cIdx].netId;
-                    const U64 targetKey = (static_cast<U64>(curCommitEpoch) << 32) | static_cast<U64>(netId);
+                    const bool isExcl = connIsExclusive(cIdx);
+                    size_t uLo = 0u, uHi = 0u;
+                    connUserRange(cIdx, len, uLo, uHi);
+                    const U64 baseKey = (static_cast<U64>(curCommitEpoch) << 32) | static_cast<U64>(netId);
                     bool conflict = false;
                     bool sawSameNetInWave = false;
-                    for (U32 i = 1u; i + 1u < len; ++i) {
+                    for (size_t i = uLo; i < uHi; ++i) {
                         U64 cur = __atomic_load_n(&G.waveCommitKey[pPtr[i]], __ATOMIC_RELAXED);
-                        if ((cur >> 32) == curCommitEpoch) {
-                            if (static_cast<U32>(cur) != netId) { conflict = true; break; }
+                        if (((cur >> 32) & 0x7FFFFFFFULL) == curCommitEpoch) {
+                            if (static_cast<U32>(cur) != netId
+                                    || (!isExcl && i == 0u && (cur & (1ULL << 63)) != 0ULL)) {
+                                conflict = true;
+                                break;
+                            }
                             sawSameNetInWave = true;
                         }
                     }
                     if (!conflict) {
-                        for (U32 i = 1u; i + 1u < len; ++i) {
+                        for (size_t i = uLo; i < uHi; ++i) {
                             U32 nid = pPtr[i];
+                            U64 targetKey = baseKey | ((!isExcl && i == 0u) ? (1ULL << 63) : 0ULL);
                             U64 expected = __atomic_load_n(&G.waveCommitKey[nid], __ATOMIC_RELAXED);
                             while (true) {
-                                if ((expected >> 32) == curCommitEpoch) {
-                                    if (static_cast<U32>(expected) != netId) { conflict = true; break; }
+                                if (((expected >> 32) & 0x7FFFFFFFULL) == curCommitEpoch) {
+                                    if (static_cast<U32>(expected) != netId
+                                            || (!isExcl && i == 0u && (expected & (1ULL << 63)) != 0ULL)) {
+                                        conflict = true;
+                                        break;
+                                    }
                                     sawSameNetInWave = true;
                                     break;
                                 }
@@ -4915,12 +5048,16 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                                 const U32* pPtr = devBufs[d].outPaths + res.pathOffset;
                                 if (!wasRipped[k] && G.connRouted[cIdx]) {
                                     const auto& oldPath = G.connPaths[cIdx];
-                                    for (size_t i = 1; i + 1 < oldPath.size(); ++i) {
+                                    size_t oLo = 0u, oHi = 0u;
+                                    connUserRange(cIdx, oldPath.size(), oLo, oHi);
+                                    for (size_t i = oLo; i < oHi; ++i) {
                                         addToScopeDeferredFn(sc, oldPath[i], -1, pushShardDelta);
                                     }
                                 }
-                                ensureScopeCapacitySingleThread(sc, len);
-                                for (U32 i = 1; i + 1 < len; ++i) {
+                                size_t nLo = 0u, nHi = 0u;
+                                connUserRange(cIdx, len, nLo, nHi);
+                                ensureScopeCapacitySingleThread(sc, nHi > nLo ? (nHi - nLo) : 0u);
+                                for (size_t i = nLo; i < nHi; ++i) {
                                     addToScopeDeferredFn(sc, pPtr[i], +1, pushShardDelta);
                                 }
                                 G.connPaths[cIdx].assign(pPtr, pPtr + len);
@@ -5177,9 +5314,21 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                                              static_cast<I32>(gk.endTileYRaw), static_cast<I32>(gk.tileY), cd.sinkBeginY});
                     I32 ny1 = std::max<I32>({static_cast<I32>(gs.endTileYRaw), static_cast<I32>(gs.tileY),
                                              static_cast<I32>(gk.endTileYRaw), static_cast<I32>(gk.tileY), cd.sinkBeginY});
+                    for (uint8_t ai = 0u; ai < cd.altCount; ++ai) {
+                        const NodeGeomHot& ag = G.geomHot[G.altSinkPool[cd.altStart + ai]];
+                        I32 ax = static_cast<I32>(ag.endTileX);
+                        I32 ay0 = std::min(static_cast<I32>(ag.endTileYRaw), static_cast<I32>(ag.tileY));
+                        I32 ay1 = std::max(static_cast<I32>(ag.endTileYRaw), static_cast<I32>(ag.tileY));
+                        if (ax < nx0) nx0 = ax;
+                        if (ax > nx1) nx1 = ax;
+                        if (ay0 < ny0) ny0 = ay0;
+                        if (ay1 > ny1) ny1 = ay1;
+                    }
                     if (G.connRouted[cIdx]) {
                         const auto& op = G.connPaths[cIdx];
-                        for (size_t j = 1; j + 1 < op.size(); ++j) {
+                        size_t oLo = 0u, oHi = 0u;
+                        connUserRange(cIdx, op.size(), oLo, oHi);
+                        for (size_t j = oLo; j < oHi; ++j) {
                             const NodeGeomHot& gh = G.geomHot[op[j]];
                             I32 x = static_cast<I32>(gh.endTileX);
                             I32 y0 = std::min(static_cast<I32>(gh.endTileYRaw), static_cast<I32>(gh.tileY));
@@ -5332,7 +5481,7 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                     flushGpuOccDeltas();
                     clearAllMegaCache();
 
-                    if (G.waveCommitEpoch >= 3800000000u) {
+                    if (G.waveCommitEpoch >= 1900000000u) {
                         std::memset(G.waveCommitKey.data(), 0, G.waveCommitKey.size() * sizeof(U64));
                         G.waveCommitEpoch = 1u;
                     }
@@ -5591,12 +5740,14 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 savedPaths[i] = G.connPaths[connIdx];
                 float mh = 0.0f;
                 const auto& p = savedPaths[i];
-                for (size_t j = 1; j + 1 < p.size(); ++j) {
+                size_t uLo = 0u, uHi = 0u;
+                connUserRange(connIdx, p.size(), uLo, uHi);
+                for (size_t j = uLo; j < uHi; ++j) {
                     mh = std::max(mh, G.hist[p[j]]);
                 }
                 itemMaxHist[i] = mh;
                 NetScopeData& sc = G.netScopes[G.conns[connIdx].netId];
-                for (size_t j = 1; j + 1 < p.size(); ++j) {
+                for (size_t j = uLo; j < uHi; ++j) {
                     addToScope(sc, p[j], -1);
                 }
                 G.connRouted[connIdx] = 0;
@@ -5688,11 +5839,13 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                 G.tailFailStreak[connIdx] = 0u;
                 U32 netId = G.conns[connIdx].netId;
                 NetScopeData& sc = G.netScopes[netId];
-                ensureScopeCapacitySingleThread(sc, singlePath.size());
-                for (size_t j = 1; j + 1 < singlePath.size(); ++j) {
+                size_t nLo = 0u, nHi = 0u;
+                connUserRange(connIdx, singlePath.size(), nLo, nHi);
+                ensureScopeCapacitySingleThread(sc, nHi > nLo ? (nHi - nLo) : 0u);
+                for (size_t j = nLo; j < nHi; ++j) {
                     addToScope(sc, singlePath[j], +1);
                 }
-                commitStampedPath(netId, singlePath);
+                commitStampedPath(connIdx, netId, singlePath);
                 G.connPaths[connIdx].swap(singlePath);
                 G.connRouted[connIdx] = 1;
                 ++routedCount;
@@ -5703,8 +5856,10 @@ JNIEXPORT void JNICALL Java_com_xilinx_rapidwright_rwroute_FidesNativeCpu_native
                     U32 netId = G.conns[connIdx].netId;
                     NetScopeData& sc = G.netScopes[netId];
                     const auto& sp = savedPaths[idxPos];
-                    ensureScopeCapacitySingleThread(sc, sp.size());
-                    for (size_t j = 1; j + 1 < sp.size(); ++j) {
+                    size_t sLo = 0u, sHi = 0u;
+                    connUserRange(connIdx, sp.size(), sLo, sHi);
+                    ensureScopeCapacitySingleThread(sc, sHi > sLo ? (sHi - sLo) : 0u);
+                    for (size_t j = sLo; j < sHi; ++j) {
                         addToScope(sc, sp[j], +1);
                     }
                     G.connPaths[connIdx].swap(savedPaths[idxPos]);

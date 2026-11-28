@@ -638,6 +638,7 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
         final int[] dhpwl = new int[n];
         final byte[] flags = new byte[n];
         final byte[] corrMode = new byte[n];
+        final int[][] altPerConn = new int[n][];
         final boolean useOrigBox = cfg.isUseBoundingBox();
         final boolean uturn = cfg.isUseUTurnNodes();
         final int cChunk = Math.max(4096, (n + workers * 4 - 1) / (workers * 4));
@@ -654,8 +655,37 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
                     int tId = f4FastId(sink);
                     RouteNodeType sType = sink != null ? sink.getType() : null;
                     int dHpwl = nw.getDoubleHpwl();
-                    boolean shapeOk = !c.hasAltSinks() && src != sink && sId >= 0 && tId >= 0
-                            && sType != null && sType.isAnyExclusiveSink() && dHpwl > 0;
+                    boolean hasAlts = c.hasAltSinks();
+                    int[] alts = null;
+                    boolean altsOk = true;
+                    if (hasAlts) {
+                        List<RouteNode> altList = c.getAltSinkRnodes();
+                        int aCnt = altList.size();
+                        if (aCnt <= 0 || aCnt > 5 || sType == null || sType.isAnyExclusiveSink()
+                                || !(sType == RouteNodeType.LOCAL_EAST || sType == RouteNodeType.LOCAL_WEST
+                                     || sType == RouteNodeType.LOCAL_BOTH)) {
+                            altsOk = false;
+                        } else {
+                            alts = new int[aCnt];
+                            for (int ai = 0; ai < aCnt; ++ai) {
+                                RouteNode ar = altList.get(ai);
+                                int aid = f4FastId(ar);
+                                if (aid < 0 || ar == src || ar == sink) {
+                                    altsOk = false;
+                                    break;
+                                }
+                                alts[ai] = aid;
+                            }
+                        }
+                    }
+                    altPerConn[i] = (hasAlts && altsOk) ? alts : null;
+                    boolean shapeOk = altsOk && src != sink && sId >= 0 && tId >= 0
+                            && sType != null
+                            && ((!hasAlts && sType.isAnyExclusiveSink())
+                                || (hasAlts && (sType == RouteNodeType.LOCAL_EAST
+                                                || sType == RouteNodeType.LOCAL_WEST
+                                                || sType == RouteNodeType.LOCAL_BOTH)))
+                            && dHpwl > 0;
                     byte fl = 0;
                     if (shapeOk) fl |= 1;
                     if (useOrigBox) fl |= 2;
@@ -663,7 +693,8 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
                     if (c.isCrossSLR()) fl |= 8;
                     if (c.isCrossSLRnorth()) fl |= 16;
                     if (c.isCrossSLRsouth()) fl |= 32;
-                    if (sType == RouteNodeType.EXCLUSIVE_SINK_BOTH) fl |= 64;
+                    if (sType == RouteNodeType.EXCLUSIVE_SINK_BOTH || sType == RouteNodeType.LOCAL_BOTH) fl |= 64;
+                    if (hasAlts && altsOk) fl |= (byte) 128;
 
                     srcId[i] = sId;
                     sinkId[i] = tId;
@@ -720,6 +751,25 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
         FidesNativeCpu.nativeRegisterConnections(
                 netId, srcId, sinkId, ox0, oy0, ox1, oy1,
                 sbx, sby, stile, stype, nxc, nyc, nsize, dhpwl, flags);
+        int[] altOffsets = new int[n + 1];
+        int totalAlts = 0;
+        for (int i = 0; i < n; ++i) {
+            altOffsets[i] = totalAlts;
+            if (altPerConn[i] != null) totalAlts += altPerConn[i].length;
+        }
+        altOffsets[n] = totalAlts;
+        int[] altIds = new int[totalAlts];
+        if (totalAlts > 0) {
+            int pos = 0;
+            for (int i = 0; i < n; ++i) {
+                int[] a = altPerConn[i];
+                if (a != null) {
+                    System.arraycopy(a, 0, altIds, pos, a.length);
+                    pos += a.length;
+                }
+            }
+        }
+        FidesNativeCpu.nativeRegisterAltSinks(altOffsets, altIds);
         this.f4CorrMode = corrMode;
         int crossCnt = 0;
         for (int i = 0; i < n; ++i) {
@@ -948,7 +998,22 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
             Connection c = all.get(i);
             int len = path.length;
             RouteNode[] chain = new RouteNode[len];
-            chain[0] = c.getSinkRnode();
+            RouteNode actualSink = c.getSinkRnode();
+            if (c.hasAltSinks() && f4FastId(actualSink) != path[0]) {
+                RouteNode foundSink = null;
+                for (RouteNode cand : c.getAltSinkRnodes()) {
+                    if (f4FastId(cand) == path[0]) { foundSink = cand; break; }
+                }
+                if (foundSink == null) {
+                    foundSink = (path[0] >= 0 && path[0] < nodeCache.length && nodeCache[path[0]] != null)
+                            ? nodeCache[path[0]] : f4FastNodeAt(path[0]);
+                }
+                if (foundSink == null) {
+                    throw new IllegalStateException("V96 verify missing altSink id=" + path[0] + " conn=" + i);
+                }
+                actualSink = foundSink;
+            }
+            chain[0] = actualSink;
             chain[len - 1] = c.getSourceRnode();
             for (int k = len - 2; k >= 1; --k) chain[k] = nodeCache[path[k]];
             for (int k = len - 2; k >= 0; --k) {
@@ -997,6 +1062,20 @@ final class FidesLaneGate implements FidesLane.MutableColumns, FidesLane.LiveOra
                     }
                     int len = path.length;
                     RouteNode sinkRnode = c.getSinkRnode();
+                    if (c.hasAltSinks() && f4FastId(sinkRnode) != path[0]) {
+                        RouteNode foundSink = null;
+                        for (RouteNode cand : c.getAltSinkRnodes()) {
+                            if (f4FastId(cand) == path[0]) { foundSink = cand; break; }
+                        }
+                        if (foundSink == null) {
+                            foundSink = (path[0] >= 0 && path[0] < nodeCache.length && nodeCache[path[0]] != null)
+                                    ? nodeCache[path[0]] : f4FastNodeAt(path[0]);
+                        }
+                        if (foundSink == null) {
+                            throw new IllegalStateException("V96 materialize missing altSink id=" + path[0] + " conn=" + i);
+                        }
+                        sinkRnode = foundSink;
+                    }
                     RouteNode srcRnode = c.getSourceRnode();
                     c.addRnode(sinkRnode);
                     for (int k = 1; k <= len - 2; ++k) {

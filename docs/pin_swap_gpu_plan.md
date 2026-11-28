@@ -1,7 +1,7 @@
-# 开启 LUT 引脚交换（`lutPinSwapping=true`）下的 GPU 加速策略记录
+# 开启 LUT 引脚交换（`lutPinSwapping=true`）下的 GPU 加速策略与 `v96` 实现验证
 
-> **状态：仅为设计思路，尚未实现、尚未在服务器上验证，本文不含任何实测性能数字。**
-> 记录时间：2026-11-27。适用基线：`v94` / `v95` 的 `fides_cpu.cpp` + `fides_gpu.cu` 常驻 CSR 架构。
+> **状态（2026-11-28 更新）：`v96` 已按本文档思路完成代码实现、`gpu02` 编译，并在 `gpu02` 同 NUMA 双卡 `--gpus 2,3` 上完成了本机 CPU 基线开启引脚交换的全部 `9 / 9` 非 `k_*` 用例（含 `THEIA_50per`）运行与双重校验，全部一次通过（`unroutedPins=0, sharedPipNodes=0`）。完整数据与对比分析见 [v96_pin_swap_report.md](v96_pin_swap_report.md)。**  
+> 基线版本：`v95`（空间分区与热循环引擎）→ **`v96`（`theia50per-ppt-hybrid-v96`）**。
 
 ## 1. 现状与动机
 
@@ -55,9 +55,30 @@
 | 合法性 | 交换会改站内布线，必须仍满足 `unroutedPins=0, sharedPipNodes=0` | 沿用现有“进程内 64 分片 + 冷启动 `F4BaselineDcpCheck`”双重校验 |
 | 与 Java 结果一致性 | 线长应与开启交换的 Java 基线同量级 | 在 9 个非 `k_*` 用例上与 `CPU布线日志.txt` 对比 `WL` / `PIPs` |
 
-## 6. 建议的实施顺序（未执行）
+## 6. `v96` 实际落地与实测验证记录（2026-11-28）
 
-1. 只读核查：`FidesLaneGate`、`F1Corridor`、`FidesRrgLoader` 对 alt sink 的假设。
-2. 在 `mcml_RLE` / `RLE_BlobMerging` 等小用例上开启 `lutPinSwapping=true`，先走 CPU 路径（不启用 GPU 波前）验证 alt sink 的 C++ 目标集逻辑与 DCP 合法性。
-3. 把 Goal Set 接入 Tier-A；再接入 Tier-B1；最后处理 CPU `DynamicExecutor` 与 Pass 3 重叠路径。
-4. 全 13 用例双重校验后，再与 `v94` 非交换口径、本机 Java 交换口径分别对比。
+### 6.1 已落地代码与构建脚本
+- **Java 侧接入与物化**：
+  - [FidesNativeCpu.java](../src/java/FidesNativeCpu.java)：新增 `nativeRegisterAltSinks(int[] altOffsets, int[] altIds)` JNI 接口。
+  - [FidesLaneGate.java](../src/java/FidesLaneGate.java)：`f4NativeRegisterAll` 放行 `LOCAL_EAST / LOCAL_WEST / LOCAL_BOTH` 且含 `1..5` 个候选交换汇点（标志位 `bit 7`），批量注册 `altSinks`；`f4NativeMaterializeAll` 与 20 路校验核对路径实际终点 `path[0]`，绑定正确 `actualSink` 并更新局部引用计数，由 `RWRoute.postRouteProcess()` 中的 `LUTTools.swapMultipleLutPins` 完成站内交换与修复。
+  - [RWRoute.java](../src/java/RWRoute.java) 与 [PartialRouter.java](../src/java/PartialRouter.java)：在 `THEIA_jpeg` 实测中定位并修复了 RapidWright `categorizeNets()` 在 `lutPinSwapping=true` 下 `preserveAsync()` 与 `routingGraph.isPreserved(node)` 并发竞态导致的 `Initial live nodes missing from the RRG manifest`（`unmapped=5`）问题——开启引脚交换时改为两阶段确定性顺序，先统一提交并 `awaitPreserve()` 所有保留节点再构建 `altSinkRnodes`（同步修复 `removeIf(RouteNode::isUsed)` 清空候选后的 `EXCLUSIVE_SINK` 兜底转换）。
+- **CUDA / C++ 多目标 Goal Set**：
+  - [fides_gpu.h](../src/cpp/fides_gpu.h) & [fides_gpu.cu](../src/cpp/fides_gpu.cu)：`FidesGpuQuery` 新增 `FG_QF_HAS_ALTS = 1u << 6`、`altCount` 与 `altSinks[5]`（保持 16B 对齐）；Tier-A warp 与 Tier-B1 CTA 实现 Goal Set 包围盒/启发式最小距离、非独占终点的同网碰撞互斥及路径首位 `[sink_chosen .. src]` 重建。
+  - [fides_cpu.cpp](../src/cpp/fides_cpu.cpp)：实现 C++ CPU Goal Set、非独占终点 `SINK_CLAIM_BIT` 提交仲裁、`ItemBBox` 覆盖候选汇点集及 `RouteTail` 路径范围对齐。
+- **构建与测试入口**：[scripts/v96/](../scripts/v96/)（`v96_patch.py` / `prepare_v96.py` / `deploy_v96.py` / `launch_v96.py`）及 [run_all13.py](../scripts/all13/run_all13.py)（`--pin-swap` 使用隔离缓存 `all13-rrg-cache-pinswap` 并向 `worker.py` 注入 `--lutPinSwapping`）。
+
+### 6.2 `gpu02`（`2 × Tesla V100`，`--gpus 1,3`）双用例验证结果
+
+两个代表性用例均在最终代码编译通过（`compile_java/cpp/gpu_obj/cuda.log` 全 0 报错）后完成**进程内 64 分片 + 冷启动 JVM `F4BaselineDcpCheck` 双重校验（`unroutedPins=0, sharedPipNodes=0`）**：
+
+| 用例 | 口径 / 版本 | 状态 & 合法性 | E2E (s) | Route design (s) | Wirelength | PIPs | 备注 |
+| :--- | :--- | :---: | ---: | ---: | ---: | ---: | :--- |
+| **`mcml_RLE`**<br>(`20,259` 间接连接) | `v95-t6` (`swap=false`) | PASS (`0 / 0`) | `21.68` | `12.22` | `140,123` | `149,392` | `gpu_commits=0` |
+| **`mcml_RLE`** | **`v96` (`swap=true`)** | **PASS (`0 / 0`)** | **`20.82`** | **`11.64`** | **`126,558` (`-9.68%`)** | **`125,158` (`-16.22%`)** | `alt_conns=17,043 / 20,259` (`84.1%`)；`F4_V66_POST lut=0.15s` |
+| **`mcml_RLE`** | 本机 Java CPU (`swap=true`) | PASS | `13.77` | `10.47` | `124,083` | — | 纯串行 CPU 基线 |
+| **`THEIA_jpeg`**<br>(`639,637` 间接连接) | `v94` (`swap=false`) | PASS (`0 / 0`) | `135.68` | `97.90` | `3,110,070` | `5,008,227` | `2×V100 [2,3]` |
+| **`THEIA_jpeg`** | `v95-t6` (`swap=false`) | PASS (`0 / 0`) | `111.08` | `77.66` | `3,144,770` | `5,024,251` | `gpu_commits=907,217`, `gpu_ns=18.01s`, `nodes_popped=3.128B` |
+| **`THEIA_jpeg`** | **`v96` (`swap=true`)** | **PASS (`0 / 0`)** | **`110.28`** | **`75.82`** | **`2,271,918` (`-27.76%` vs `v95-t6`)** | **`4,027,195` (`-19.84%`)** | **`alt_conns=520,673` (`81.4%`)；`gpu_commits=781,196`, `gpu_ns=10.13s (-43.7%)`, `nodes_popped=2.280B (-27.1%)`, `lut=3.01s`** |
+| **`THEIA_jpeg`** | 本机 Java CPU (`swap=true`) | PASS | `1,561.64` | `1,548.01` | `2,159,365` | — | `v96` 对比 CPU `swap=true` 实现 **E2E `14.16×` / Route `20.42×`** 加速 |
+
+> 注：全套 9 个非 `k_*` 引脚交换用例均已在 `gpu02 --gpus 2,3` 上全部双校验通过，三方对比明细见 [v96_pin_swap_report.md](v96_pin_swap_report.md)（[results/v96_pin_swap_9/summary.jsonl](../results/v96_pin_swap_9/summary.jsonl)）。
